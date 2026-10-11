@@ -1,0 +1,14 @@
+{
+  // Highlighting comes from mshr-h.veriloghdl. Linting is off on purpose:
+  // a single-file linter cannot see included headers, instantiated submodules,
+  // or the Makefile's flags, so it invents errors the build does not have.
+  // `make sim MOD=<mod>` is the source of truth.
+  "verilog.linting.linter": "none",
+
+  // Inline (AI ghost-text) suggestions are ON for Verilog. They were disabled
+  // for a while during the ALU/decoder work; re-enabled at the user's request
+  // once the module bodies gave way to instantiation boilerplate.
+  "[verilog]": {
+    "editor.inlineSuggest.enabled": true
+  }
+}
