@@ -1,16 +1,27 @@
 # RVI32 — project context for Claude
 
-A **single-cycle RV32I RISC-V CPU** in Verilog, built **simulation-first** as a way to
-learn Verilog properly. No FPGA work until a design is fully verified in simulation.
-Goal: run **GCC-compiled programs** on the core.
+A RISC-V (RV32I) core in Verilog, used as a platform for learning RTL properly and for
+exploring microarchitecture. It started as a single-cycle core; the plan is to keep
+going — pipelining, caches, branch prediction, and eventually custom units such as a
+matmul accelerator — and compare designs against each other.
 
-## Division of labor (do not violate)
-This is a learning project, so the split is deliberate:
-- **The human writes the RTL** in `rtl/`. That is the point of the project.
-- **Claude writes the testbenches** in `tb/`, the test programs, and the build glue.
-- Claude may write **interface stubs** (port lists, shared `` `define `` headers) so a
-  testbench compiles, but leaves the logic body as a `TODO`. Do not write RTL logic
-  unless explicitly asked.
+The owner writes the RTL to learn it, and may ask for help with mechanical parts.
+Everything is **simulation-first**: no FPGA work until a design is verified in sim.
+
+## Objectives
+- Learn Verilog and HDL verification discipline the proper way.
+- Run **GCC-compiled C programs** on the core.
+- Use the core to explore design directions and measure them (cycles, CPI, hit rates).
+
+Implications for how things are built now:
+- **Keep tests architectural.** Check end state and program output, never internal
+  timing, so the same tests verify a single-cycle, pipelined or cached core. The C
+  programs from Phase 2 become the regression suite every future design must pass.
+- **Keep module interfaces honest.** Today's memory answers instantly (async read); a
+  cache only matters once memory has latency, so a ready/valid style interface will be
+  needed before caches. Don't let the CPU assume zero-latency memory more than it has to.
+- **Accelerators** can use RISC-V's reserved *custom-0* opcode (`0001011`), which the
+  control unit currently treats as illegal, or sit behind memory-mapped registers.
 
 ## Toolchain (Ubuntu 24.04)
 ```sh
@@ -19,7 +30,7 @@ sudo apt install -y iverilog gtkwave gcc-riscv64-unknown-elf universal-ctags
 
 ## Layout and commands
 ```
-rtl/<mod>.v      RTL (human-written)          rtl/*.vh   shared `define headers
+rtl/<mod>.v      RTL                          rtl/*.vh   shared `define headers
 tb/<mod>_tb.v    self-checking testbench      tb/p_*.S   test programs for the cpu
 build/           all generated artifacts (gitignored)
 ```
@@ -68,7 +79,10 @@ make clean
 - Illegal instructions (unknown opcode or unallocated funct3) force `reg_write` and
   `mem_write` to 0. Writes are also gated off during reset.
 
-## Status
-- **Phase 1 done:** regfile, alu, decoder, memory, control, cpu all pass.
-- **Phase 2 next:** `crt0.S`, a linker script for the memory map, and memory-mapped
-  putchar/exit (the `tohost` pattern) so a C program can print and halt.
+## Status and roadmap
+- **Phase 1 — done.** Single-cycle core: regfile, alu, decoder, memory, control, cpu.
+- **Phase 2 — next.** Run C: `crt0.S`, a linker script for the memory map, and
+  memory-mapped putchar/exit (the `tohost` pattern) so a program can print and halt.
+- **Then, open-ended:** performance counters (cycles, instret) to measure everything
+  after; a pipelined core (hazards, forwarding, branch prediction); a memory with latency
+  and caches in front of it; the M extension; a matmul accelerator; eventually an FPGA.
