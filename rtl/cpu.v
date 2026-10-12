@@ -91,9 +91,9 @@ module cpu #(
     // PC register management
     always @(posedge clk) begin
         if (rst) begin
-            PC = 32'd0;
+            PC <= 32'd0;
         end else begin
-            PC = next_pc;
+            PC <= next_pc;
         end
     end
 
@@ -192,9 +192,9 @@ module cpu #(
                       (mem_size == `SZ_H) ? ((load_unsigned) ? {16'd0, ld_half} : {{16{ld_half[15]}}, ld_half}) :
                       drdata;
 
-   assign wstrb = (mem_write) ? ((mem_size == `SZ_B) ? (4'b0001 << y[1:0]) : (mem_size == `SZ_H) ? (4'b0011 << y[1:0]) : 4'b1111) : 4'b0000;
+   assign wstrb = (mem_write && !rst) ? ((mem_size == `SZ_B) ? (4'b0001 << y[1:0]) : (mem_size == `SZ_H) ? (4'b0011 << y[1:0]) : 4'b1111) : 4'b0000;
    assign daddr = y;
-   assign we = reg_write && !illegal;
+   assign we = reg_write && !illegal && !rst;
    assign dwdata = rd2;
 
 endmodule
