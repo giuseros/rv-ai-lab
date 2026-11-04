@@ -42,7 +42,7 @@ sim: $(BUILD)/$(MOD).vvp
 	@vvp $<
 
 wave: sim
-	@gtkwave $(BUILD)/$(MOD).vcd >/dev/null 2>&1 &
+	@gtkwave $(BUILD)/$(MOD).vcd $(wildcard tb/$(MOD).gtkw) >/dev/null 2>&1 &
 
 $(BUILD)/$(MOD).vvp: $(SRCS) | $(BUILD)
 	iverilog $(IVFLAGS) -o $@ $(SRCS)

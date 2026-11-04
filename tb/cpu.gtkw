@@ -1,0 +1,78 @@
+[*] RVI32 cpu_tb waveform layout: the c_mem core running tb/p_mem.S.
+[*] Opened automatically by `make wave MOD=cpu`. Zoom to 0-270 ns to see the program.
+[dumpfile] "build/cpu.vcd"
+[timestart] 0
+[size] 1600 1000
+[sst_width] 220
+[signals_width] 230
+@200
+-Clock / reset
+@28
+cpu_tb.c_mem.clk
+cpu_tb.c_mem.rst
+@200
+-Fetch
+@22
+cpu_tb.c_mem.PC[31:0]
+cpu_tb.c_mem.instr[31:0]
+cpu_tb.c_mem.next_pc[31:0]
+@200
+-Decode
+@22
+cpu_tb.c_mem.rd[4:0]
+cpu_tb.c_mem.rs1[4:0]
+cpu_tb.c_mem.funct3[2:0]
+cpu_tb.c_mem.imm[31:0]
+@200
+-Control
+@28
+cpu_tb.c_mem.reg_write
+cpu_tb.c_mem.mem_write
+cpu_tb.c_mem.load_unsigned
+@22
+cpu_tb.c_mem.mem_size[1:0]
+cpu_tb.c_mem.result_src[1:0]
+@200
+-Execute (ALU)
+@22
+cpu_tb.c_mem.a[31:0]
+cpu_tb.c_mem.b[31:0]
+cpu_tb.c_mem.y[31:0]
+@200
+-Memory
+@22
+cpu_tb.c_mem.daddr[31:0]
+cpu_tb.c_mem.drdata[31:0]
+cpu_tb.c_mem.idx_B[1:0]
+cpu_tb.c_mem.load_data[31:0]
+@28
+cpu_tb.c_mem.wstrb[3:0]
+@22
+cpu_tb.c_mem.dwdata[31:0]
+@200
+-Writeback
+@28
+cpu_tb.c_mem.we
+@22
+cpu_tb.c_mem.wd[31:0]
+@200
+-Registers (change on the edge that ENDS the instruction)
+@22
+cpu_tb.c_mem_x1[31:0]
+cpu_tb.c_mem_x2[31:0]
+cpu_tb.c_mem_x3[31:0]
+cpu_tb.c_mem_x4[31:0]
+cpu_tb.c_mem_x5[31:0]
+cpu_tb.c_mem_x6[31:0]
+cpu_tb.c_mem_x7[31:0]
+cpu_tb.c_mem_x8[31:0]
+cpu_tb.c_mem_x9[31:0]
+cpu_tb.c_mem_x10[31:0]
+@200
+-Memory words (by byte address)
+@22
+cpu_tb.c_mem_m100[31:0]
+cpu_tb.c_mem_m104[31:0]
+cpu_tb.c_mem_m108[31:0]
+[pattern_trace] 1
+[pattern_trace] 0

@@ -29,6 +29,24 @@ module cpu_tb;
     cpu #(.WORDS(WORDS), .HEXFILE("build/p_branch.hex")) c_branch (.clk(clk), .rst(rst));
     cpu #(.WORDS(WORDS), .HEXFILE("build/p_jump.hex"))   c_jump   (.clk(clk), .rst(rst));
 
+    // ---- waveform probes for the c_mem walkthrough (tb/cpu.gtkw) ----
+    // $dumpvars skips arrays, so the register file and memory never show up in
+    // the waveform. Mirror the words p_mem uses onto plain wires, which are
+    // dumped like any other signal. Memory words are named by BYTE address.
+    wire [31:0] c_mem_x1  = c_mem.u_rf.regs[1];
+    wire [31:0] c_mem_x2  = c_mem.u_rf.regs[2];
+    wire [31:0] c_mem_x3  = c_mem.u_rf.regs[3];
+    wire [31:0] c_mem_x4  = c_mem.u_rf.regs[4];
+    wire [31:0] c_mem_x5  = c_mem.u_rf.regs[5];
+    wire [31:0] c_mem_x6  = c_mem.u_rf.regs[6];
+    wire [31:0] c_mem_x7  = c_mem.u_rf.regs[7];
+    wire [31:0] c_mem_x8  = c_mem.u_rf.regs[8];
+    wire [31:0] c_mem_x9  = c_mem.u_rf.regs[9];
+    wire [31:0] c_mem_x10 = c_mem.u_rf.regs[10];
+    wire [31:0] c_mem_m100 = c_mem.u_mem.mem[64];   // byte address 0x100
+    wire [31:0] c_mem_m104 = c_mem.u_mem.mem[65];   // byte address 0x104
+    wire [31:0] c_mem_m108 = c_mem.u_mem.mem[66];   // byte address 0x108
+
     initial clk = 0;
     always #5 clk = ~clk;
 
