@@ -38,7 +38,8 @@ build/           all generated artifacts (gitignored)
 make sim  MOD=<mod>        # compile rtl/<mod>.v + tb/<mod>_tb.v, run, self-check
 make wave MOD=<mod>        # same, then open build/<mod>.vcd in gtkwave
 make build/<prog>.hex      # assemble tb/<prog>.S into a $readmemh image
-make dis  PROG=<prog>      # disassemble a test program
+make dis   PROG=<prog>     # disassemble a test program
+make trace PROG=<prog>     # retire log: one line per executed instruction + its effect
 make clean
 ```
 `MOD=cpu` compiles all of `rtl/*.v`. The `.S -> .hex` rule is `as -march=rv32i
@@ -62,6 +63,9 @@ make clean
   - `p_mem` uses words where the selected byte's sign bit differs from byte 0's;
     `0xAABBCCDD` (every byte negative) once hid a wrong-lane sign-extension bug.
 - Verify every new testbench against a reference implementation before handing it over.
+- The **retire log** (`retire_log` in `tb/cpu_tb.v`, formatted by `tb/annotate.py`) is the
+  reference for future microarchitectures: a pipelined core must retire exactly the same
+  lines. It taps only the `u_rf`/`u_mem` ports; a pipelined core must export retire signals.
 - Stimulus changes on the opposite clock edge from the one the DUT samples (e.g. reset
   is released on a negedge).
 - `cpu_tb` instantiates four cores, one per `tb/p_*.S`, and checks state through

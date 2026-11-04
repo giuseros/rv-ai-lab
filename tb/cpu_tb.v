@@ -47,6 +47,25 @@ module cpu_tb;
     wire [31:0] c_mem_m104 = c_mem.u_mem.mem[65];   // byte address 0x104
     wire [31:0] c_mem_m108 = c_mem.u_mem.mem[66];   // byte address 0x108
 
+    // ---- retire log: `make trace PROG=p_mem` prints one line per instruction ----
+    // Off unless +trace=<prog> is given; then only that core is logged.
+    retire_log #(.NAME("p_arith")) t_arith (.clk(clk), .rst(rst),
+        .pc(c_arith.u_mem.iaddr), .instr(c_arith.u_mem.idata),
+        .we(c_arith.u_rf.we), .rd(c_arith.u_rf.rd), .wd(c_arith.u_rf.wd),
+        .daddr(c_arith.u_mem.daddr), .dwdata(c_arith.u_mem.dwdata), .wstrb(c_arith.u_mem.wstrb));
+    retire_log #(.NAME("p_mem")) t_mem (.clk(clk), .rst(rst),
+        .pc(c_mem.u_mem.iaddr), .instr(c_mem.u_mem.idata),
+        .we(c_mem.u_rf.we), .rd(c_mem.u_rf.rd), .wd(c_mem.u_rf.wd),
+        .daddr(c_mem.u_mem.daddr), .dwdata(c_mem.u_mem.dwdata), .wstrb(c_mem.u_mem.wstrb));
+    retire_log #(.NAME("p_branch")) t_branch (.clk(clk), .rst(rst),
+        .pc(c_branch.u_mem.iaddr), .instr(c_branch.u_mem.idata),
+        .we(c_branch.u_rf.we), .rd(c_branch.u_rf.rd), .wd(c_branch.u_rf.wd),
+        .daddr(c_branch.u_mem.daddr), .dwdata(c_branch.u_mem.dwdata), .wstrb(c_branch.u_mem.wstrb));
+    retire_log #(.NAME("p_jump")) t_jump (.clk(clk), .rst(rst),
+        .pc(c_jump.u_mem.iaddr), .instr(c_jump.u_mem.idata),
+        .we(c_jump.u_rf.we), .rd(c_jump.u_rf.rd), .wd(c_jump.u_rf.wd),
+        .daddr(c_jump.u_mem.daddr), .dwdata(c_jump.u_mem.dwdata), .wstrb(c_jump.u_mem.wstrb));
+
     initial clk = 0;
     always #5 clk = ~clk;
 
@@ -133,4 +152,63 @@ module cpu_tb;
         $finish;
     end
 
+endmodule
+
+
+// ===========================================================================
+// retire_log -- one line per retired instruction, for one core.
+//
+// Single-cycle only: every cycle out of reset retires exactly the instruction
+// being fetched, and its architectural effects are exactly the register-file
+// and memory writes on the closing clock edge. Sampling on the posedge reads
+// those values before the edge's non-blocking updates land, so they still
+// belong to the instruction that is finishing.
+//
+// Taps only the u_rf / u_mem ports (the existing testbench contract), never
+// cpu.v's internal names. A pipelined core retires at writeback, not at fetch,
+// so it will have to export its own retire signals (cf. RISC-V's RVFI).
+//
+// Output is machine-readable ("RETIRE n pc instr effect..."); tb/annotate.py
+// formats it and adds the disassembly.
+// ===========================================================================
+module retire_log #(parameter [8*16:1] NAME = "") (
+    input wire        clk, rst,
+    input wire [31:0] pc, instr,
+    input wire        we,
+    input wire [4:0]  rd,
+    input wire [31:0] wd,
+    input wire [31:0] daddr, dwdata,
+    input wire [3:0]  wstrb
+);
+    reg [8*16:1] want;
+    reg          on, halted;
+    integer      n;
+    wire [31:0]  base = {daddr[31:2], 2'b00};
+
+    initial begin
+        on = 1'b0; halted = 1'b0; n = 0;
+        if ($value$plusargs("trace=%s", want)) on = (want == NAME);
+    end
+
+    always @(posedge clk) if (on && !rst && !halted) begin
+        n = n + 1;
+        if (we && rd != 5'd0)
+            $display("RETIRE %0d %08h %08h x%0d <- %08h", n, pc, instr, rd, wd);
+        else case (wstrb)
+            4'b1111: $display("RETIRE %0d %08h %08h mem32[%08h] <- %08h", n, pc, instr, base,      dwdata);
+            4'b0011: $display("RETIRE %0d %08h %08h mem16[%08h] <- %04h", n, pc, instr, base,      dwdata[15:0]);
+            4'b1100: $display("RETIRE %0d %08h %08h mem16[%08h] <- %04h", n, pc, instr, base + 2,  dwdata[31:16]);
+            4'b0001: $display("RETIRE %0d %08h %08h mem8[%08h] <- %02h",  n, pc, instr, base,      dwdata[7:0]);
+            4'b0010: $display("RETIRE %0d %08h %08h mem8[%08h] <- %02h",  n, pc, instr, base + 1,  dwdata[15:8]);
+            4'b0100: $display("RETIRE %0d %08h %08h mem8[%08h] <- %02h",  n, pc, instr, base + 2,  dwdata[23:16]);
+            4'b1000: $display("RETIRE %0d %08h %08h mem8[%08h] <- %02h",  n, pc, instr, base + 3,  dwdata[31:24]);
+            4'b0000: $display("RETIRE %0d %08h %08h", n, pc, instr);   // no architectural write
+            default: $display("RETIRE %0d %08h %08h ?? wstrb=%b", n, pc, instr, wstrb);
+        endcase
+        // `jal x0, 0` jumps to itself: the program has finished. Stop logging.
+        if (instr == 32'h0000006f) begin
+            halted = 1'b1;
+            $display("RETIRE halt");
+        end
+    end
 endmodule
