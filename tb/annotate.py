@@ -2,11 +2,14 @@
 """Format a retire log and add the disassembly of each instruction.
 
 Reads the simulator's stdout on stdin, keeps only the "RETIRE ..." lines that
-tb/cpu_tb.v's retire_log prints, and looks each PC up in the program's ELF.
+retire_log (tb/tb_lib.v) prints, and looks each PC up in the program's ELF.
 
-    vvp build/cpu.vvp +trace=p_mem | python3 tb/annotate.py build/p_mem.elf
+    vvp build/soc.vvp +trace=p_mem | python3 tb/annotate.py build/p_mem.elf
 
 (`make trace PROG=p_mem` does exactly that.)
+
+With --all, lines that are not retire records (the program's console output,
+the simulation's summary) are passed through unchanged.
 """
 import re
 import subprocess
@@ -28,9 +31,12 @@ def disassembly(elf):
 
 
 def main():
-    if len(sys.argv) != 2:
+    args = sys.argv[1:]
+    passthrough = "--all" in args
+    args = [a for a in args if a != "--all"]
+    if len(args) != 1:
         sys.exit(__doc__)
-    dis = disassembly(sys.argv[1])
+    dis = disassembly(args[0])
 
     print(f"{'#':>4}  {'pc':8}  {'instr':8}  {'instruction':26}  effect")
     for line in sys.stdin:
@@ -38,6 +44,8 @@ def main():
         # echoes (e.g. "hRETIRE 5 ..."), so look for it anywhere in the line.
         pos = line.find("RETIRE ")
         if pos < 0:
+            if passthrough and "VCD info" not in line:
+                print(line, end="")
             continue
         fields = line[pos:].split()
         if fields[1] == "halt":

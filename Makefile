@@ -5,6 +5,8 @@
 #   make wave  MOD=regfile    # same, then open the waveform in gtkwave
 #   make trace PROG=p_mem     # run the soc, print one line per retired instruction
 #   make trace PROG=p_mem LAT=3   # same, on the SoC whose RAM answers 3 cycles late
+#   make run   PROG=count     # run sw/count.S on one SoC: output, exit code, CPI
+#                             #   add LAT=3 for slow memory, TRACE=1 for the retire log
 #   make dis   PROG=p_mem     # disassemble a test program
 #   make clean
 #
@@ -19,7 +21,7 @@ IVFLAGS := -g2005 -Wall -I rtl
 
 # soc.v instantiates every other module, so it needs the whole rtl/ tree.
 ifeq ($(MOD),soc)
-SRCS := $(wildcard rtl/*.v) tb/$(MOD)_tb.v
+SRCS := $(wildcard rtl/*.v) tb/tb_lib.v tb/$(MOD)_tb.v
 else
 SRCS := rtl/$(MOD).v tb/$(MOD)_tb.v
 endif
@@ -33,11 +35,17 @@ ASFLAGS := -march=rv32i -mabi=ilp32
 # soc simulation depends on these, so editing a program rebuilds it.
 PROG_HEX := $(patsubst tb/%.S,$(BUILD)/%.hex,$(wildcard tb/p_*.S))
 
-$(BUILD)/%.hex: tb/%.S | $(BUILD)
+# Assembly programs live in sw/ (programs you run) or tb/ (regression tests).
+define ASM_TO_HEX
 	$(RISCV)-as $(ASFLAGS) -o $(BUILD)/$*.o $<
 	$(RISCV)-ld -m elf32lriscv -Ttext=0 -o $(BUILD)/$*.elf $(BUILD)/$*.o
 	$(RISCV)-objcopy -O binary $(BUILD)/$*.elf $(BUILD)/$*.bin
 	od -An -tx4 -v -w4 $(BUILD)/$*.bin | awk '{print $$1}' > $@
+endef
+$(BUILD)/%.hex: sw/%.S | $(BUILD)
+	$(ASM_TO_HEX)
+$(BUILD)/%.hex: tb/%.S | $(BUILD)
+	$(ASM_TO_HEX)
 
 # Disassemble a test program, to read alongside the waveform.
 dis: $(BUILD)/$(PROG).hex
@@ -55,6 +63,20 @@ wave: sim
 trace:
 	@$(MAKE) -s --no-print-directory MOD=soc $(BUILD)/soc.vvp $(PROG_HEX)
 	@vvp $(BUILD)/soc.vvp +trace=$(PROG)$(if $(filter-out 0,$(LAT)),@$(LAT)) | python3 tb/annotate.py $(BUILD)/$(PROG).elf
+
+# Run one program (sw/<PROG>.S or tb/<PROG>.S) on a single SoC.
+#   make run PROG=count [LAT=3] [TRACE=1]
+RUN_SRCS := $(wildcard rtl/*.v) tb/tb_lib.v tb/run_tb.v
+run: $(BUILD)/$(PROG).hex
+	@iverilog $(IVFLAGS) -o $(BUILD)/run.vvp \
+	    -Prun_tb.HEXFILE='"$(BUILD)/$(PROG).hex"' \
+	    -Prun_tb.LAT=$(or $(LAT),0) \
+	    -Prun_tb.ECHO=$(if $(TRACE),0,1) \
+	    $(RUN_SRCS)
+	@vvp -n $(BUILD)/run.vvp $(if $(TRACE),+trace=run) \
+	    | grep -vE "Not enough words in the file|finish called at" \
+	    $(if $(TRACE),| python3 tb/annotate.py --all $(BUILD)/$(PROG).elf)
+.PHONY: run
 
 $(BUILD)/$(MOD).vvp: $(SRCS) | $(BUILD)
 	iverilog $(IVFLAGS) -o $@ $(SRCS)

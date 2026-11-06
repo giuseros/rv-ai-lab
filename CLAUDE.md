@@ -34,13 +34,16 @@ sudo apt install -y iverilog gtkwave gcc-riscv64-unknown-elf universal-ctags
 ## Layout and commands
 ```
 rtl/<mod>.v      RTL                          rtl/*.vh   shared `define headers
-tb/<mod>_tb.v    self-checking testbench      tb/p_*.S   test programs for the soc
-build/           all generated artifacts (gitignored)
+tb/<mod>_tb.v    self-checking testbench      tb/p_*.S   regression programs (soc_tb)
+tb/tb_lib.v      console_sink, retire_log     tb/run_tb.v  runs any one program
+sw/              programs to run (make run)   build/     generated artifacts (gitignored)
 ```
 ```sh
 make sim  MOD=<mod>        # compile rtl/<mod>.v + tb/<mod>_tb.v, run, self-check
 make wave MOD=<mod>        # same, then open build/<mod>.vcd in gtkwave
-make build/<prog>.hex      # assemble tb/<prog>.S into a $readmemh image
+make run   PROG=<prog>     # run sw/<prog>.S (or tb/): console output, exit code, CPI
+                           #   LAT=1|3 for slow memory, TRACE=1 for the retire log
+make build/<prog>.hex      # assemble sw/ or tb/<prog>.S into a $readmemh image
 make dis   PROG=<prog>     # disassemble a test program
 make trace PROG=<prog>     # retire log: one line per executed instruction + its effect
                            #   ends with instructions, cycles and CPI; LAT=1|3 for slow RAM
