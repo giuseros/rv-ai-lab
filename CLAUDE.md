@@ -43,6 +43,7 @@ make wave MOD=<mod>        # same, then open build/<mod>.vcd in gtkwave
 make build/<prog>.hex      # assemble tb/<prog>.S into a $readmemh image
 make dis   PROG=<prog>     # disassemble a test program
 make trace PROG=<prog>     # retire log: one line per executed instruction + its effect
+                           #   ends with instructions, cycles and CPI; LAT=1|3 for slow RAM
 make clean
 ```
 `MOD=soc` compiles all of `rtl/*.v`. The `.S -> .hex` rule is `as -march=rv32i
@@ -69,14 +70,17 @@ make clean
     every lane) hid that store data was never moved into the strobed lane.
 - Verify every new testbench before relying on it: against a reference implementation,
   or by **mutation testing** — break the RTL in realistic ways and confirm each mutant
-  fails (done for `bus_tb`: six mutants, all caught).
+  fails (done for `bus_tb` and the stall logic). A surviving mutant is either a test gap
+  or *equivalent* (no test could ever see it): e.g. writing RAM on every waiting cycle is
+  equivalent for RAM, but not for the console, so the console test must cover it.
 - The **retire log** (`retire_log` in `tb/soc_tb.v`, formatted by `tb/annotate.py`) is the
   reference for future microarchitectures: a pipelined core must retire exactly the same
   lines. It taps the CPU's ports (so stores to any target appear) and the `u_rf` write
   port; a pipelined core must export its own retire signals.
 - Stimulus changes on the opposite clock edge from the one the DUT samples (e.g. reset
   is released on a negedge).
-- `soc_tb` instantiates four SoCs, one per `tb/p_*.S`, and checks state through
+- `soc_tb` runs every `tb/p_*.S` at RAM latency 0, 1 and 3 (12 SoCs, per-program checks
+  are `` `define `` macros taking the instance name) and checks state through
   hierarchical references, so instance names are a contract: **`soc.v` names `u_cpu`
   and `u_mem`; `cpu.v` names `u_rf`**. Never check `u_rf.regs[0]`: x0 is a read-mux
   constant, the array slot is X.
@@ -94,8 +98,9 @@ make clean
 
 ## Status and roadmap
 - **Phase 1 — done.** Single-cycle core: regfile, alu, decoder, memory, control, cpu.
-- **Phase 2 — in progress.** Steps 1 (memory out of the cpu, `soc.v`) and 2 (`bus.v`,
-  `soc_map.vh`, `bus_tb`) done; next is step 3, `d_ready` + CPU stall. Run C on a small SoC:
+- **Phase 2 — in progress.** Done: step 1 (memory out of the cpu, `soc.v`), step 2
+  (`bus.v`, `soc_map.vh`, `bus_tb`), step 3 (`d_ready` stall + `ram_delay`). Next is
+  step 4, the console. Run C on a small SoC:
   - Memory moves out of `cpu.v`. New `soc.v` wires `cpu` + `bus` + RAM. Instruction
     fetch stays a direct port to RAM; only the data side goes through the bus.
   - Bus interface (PicoRV32 native-interface style): `d_valid`, `d_addr`, `d_wstrb`

@@ -17,8 +17,12 @@
 //                d_ready <- the target has completed the request this cycle
 //
 // d_valid is high only for real loads and stores: targets must ignore the bus
-// otherwise, because a device read can have side effects. d_ready is not used
-// yet (step 3 of Phase 2 adds the stall); soc.v currently ties it to 1.
+// otherwise, because a device read can have side effects.
+//
+// Waiting: a load or store completes in the cycle where d_valid and d_ready are
+// both 1. Until then the instruction STALLS: the PC holds and the register file
+// is not written, so the same instruction stays in place and keeps presenting
+// the same request on the bus, which is exactly what the handshake requires.
 //
 // tb/soc_tb.v reaches into the register file, so it must stay named u_rf.
 
@@ -47,11 +51,14 @@ module cpu (
     reg [31:0] PC;
     wire [31:0] next_pc;
 
+    // A memory access whose target has not answered yet: hold everything.
+    wire stall = d_valid && !d_ready;
+
     // PC register management
     always @(posedge clk) begin
         if (rst) begin
             PC <= 32'd0;
-        end else begin
+        end else if (!stall) begin
             PC <= next_pc;
         end
     end
@@ -147,7 +154,8 @@ module cpu (
 
    assign d_wstrb = (mem_write && !rst) ? ((mem_size == `SZ_B) ? (4'b0001 << y[1:0]) : (mem_size == `SZ_H) ? (4'b0011 << y[1:0]) : 4'b1111) : 4'b0000;
    assign d_addr  = y;
-   assign we = reg_write && !illegal && !rst;
+   // no register write while stalled: a load's data is not there yet
+   assign we = reg_write && !illegal && !rst && !stall;
    // Store data: replicate the byte/half into every lane, so whichever lane
    // d_wstrb selects already holds the right data (sb to 0x...1 writes lane 1,
    // which must contain rd2[7:0], not rd2[15:8]).

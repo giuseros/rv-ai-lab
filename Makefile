@@ -4,6 +4,7 @@
 #   make sim   MOD=regfile    # compile rtl/<MOD>.v + tb/<MOD>_tb.v, run, self-check
 #   make wave  MOD=regfile    # same, then open the waveform in gtkwave
 #   make trace PROG=p_mem     # run the soc, print one line per retired instruction
+#   make trace PROG=p_mem LAT=3   # same, on the SoC whose RAM answers 3 cycles late
 #   make dis   PROG=p_mem     # disassemble a test program
 #   make clean
 #
@@ -53,7 +54,7 @@ wave: sim
 # Retire log for one soc_tb core (named by its program), with disassembly.
 trace:
 	@$(MAKE) -s --no-print-directory MOD=soc $(BUILD)/soc.vvp $(PROG_HEX)
-	@vvp $(BUILD)/soc.vvp +trace=$(PROG) | python3 tb/annotate.py $(BUILD)/$(PROG).elf
+	@vvp $(BUILD)/soc.vvp +trace=$(PROG)$(if $(filter-out 0,$(LAT)),@$(LAT)) | python3 tb/annotate.py $(BUILD)/$(PROG).elf
 
 $(BUILD)/$(MOD).vvp: $(SRCS) | $(BUILD)
 	iverilog $(IVFLAGS) -o $@ $(SRCS)

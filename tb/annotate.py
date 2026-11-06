@@ -38,7 +38,8 @@ def main():
             continue
         fields = line.split()
         if fields[1] == "halt":
-            print("      (program jumps to itself: halted)")
+            n, cycles = int(fields[2]), int(fields[3])
+            print(f"      (halted: {n} instructions in {cycles} cycles, CPI {cycles / n:.2f})")
             break
         n, pc, instr = fields[1], fields[2], fields[3]
         effect = " ".join(fields[4:])

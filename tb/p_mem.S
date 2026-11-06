@@ -37,5 +37,13 @@ _start:
     sb    x17, 13(x1)          # byte 0x10D <- AB    -> 0x0000AB00
     sh    x18, 14(x1)          # half 0x10E <- 1234  -> 0x1234AB00
     lw    x19, 12(x1)          # 0x1234AB00
+
+    # A load whose destination is also its address register (p = p->next).
+    # While a slow load waits, the CPU must not write x20: if it did, the
+    # address it is presenting would change mid-request. This catches a stall
+    # that freezes the PC but forgets to block the register write.
+    addi  x20, x1, 16          # x20 = 0x110
+    sw    x1,  16(x1)          # mem[0x110] = 0x00000100
+    lw    x20, 0(x20)          # x20 = mem[0x110] = 0x00000100
 loop:
     jal   x0, loop

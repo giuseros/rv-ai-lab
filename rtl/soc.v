@@ -6,9 +6,9 @@
 //            fetch port
 //        +------------------------------------------+
 //        |                                          v
-//     +-----+  data port  +-----+   region 0    +-------+
-//     | cpu | ----------> | bus | ------------> |  RAM  |
-//     +-----+ <---------- +-----+               +-------+
+//     +-----+  data port  +-----+  region 0  +-----------+   +-------+
+//     | cpu | ----------> | bus | ---------> | ram_delay | ->|  RAM  |
+//     +-----+ <---------- +-----+            +-----------+   +-------+
 //                            |      region 1
 //                            +----------------> io_* ports (to the testbench)
 //
@@ -25,8 +25,9 @@
 `timescale 1ns/1ps
 
 module soc #(
-    parameter WORDS   = 4096,      // RAM size in 32-bit words (4096 = 16 KiB)
-    parameter HEXFILE = ""         // program image loaded into RAM at time 0
+    parameter WORDS       = 4096,  // RAM size in 32-bit words (4096 = 16 KiB)
+    parameter HEXFILE     = "",    // program image loaded into RAM at time 0
+    parameter RAM_LATENCY = 0      // extra cycles per data access (0 = instant)
 ) (
     input  wire        clk,
     input  wire        rst,
@@ -59,6 +60,10 @@ module soc #(
     wire [31:0] ram_rdata;
     wire        ram_ready;
 
+    // ram_delay -> RAM
+    wire [3:0]  mem_wstrb;
+    wire [31:0] mem_rdata;
+
     cpu u_cpu (
         .clk     (clk),
         .rst     (rst),
@@ -81,21 +86,29 @@ module soc #(
         .io_wdata  (io_wdata),  .io_rdata (io_rdata), .io_ready (io_ready)
     );
 
-    // The RAM is passive and answers combinationally. It ignores ram_valid:
-    // it only writes when a strobe is set, the bus already zeroes the strobes
-    // for requests that are not for it, and an unrequested read is harmless.
+    // Turns the instant RAM into a target that answers after RAM_LATENCY cycles.
+    ram_delay #(.LATENCY(RAM_LATENCY)) u_delay (
+        .clk       (clk),
+        .rst       (rst),
+        .valid     (ram_valid),
+        .wstrb     (ram_wstrb),
+        .rdata     (ram_rdata),
+        .ready     (ram_ready),
+        .mem_wstrb (mem_wstrb),
+        .mem_rdata (mem_rdata)
+    );
+
+    // The RAM itself is passive and answers combinationally: it writes only the
+    // lanes whose strobe is set (ram_delay sets them on the completing cycle
+    // only), and an unrequested read is harmless.
     memory #(.WORDS(WORDS), .HEXFILE(HEXFILE)) u_mem (
         .clk    (clk),
         .iaddr  (i_addr),
         .idata  (i_data),
         .daddr  (ram_addr),
-        .drdata (ram_rdata),
+        .drdata (mem_rdata),
         .dwdata (ram_wdata),
-        .wstrb  (ram_wstrb)
+        .wstrb  (mem_wstrb)
     );
-
-    // The RAM completes every request in the cycle it is made. Step 3 puts a
-    // real handshake here.
-    assign ram_ready = 1'b1;
 
 endmodule
