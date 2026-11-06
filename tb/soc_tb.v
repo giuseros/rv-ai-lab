@@ -24,10 +24,18 @@ module soc_tb;
     integer errors = 0;
     integer checks = 0;
 
-    soc #(.WORDS(WORDS), .HEXFILE("build/p_arith.hex"))  c_arith  (.clk(clk), .rst(rst));
-    soc #(.WORDS(WORDS), .HEXFILE("build/p_mem.hex"))    c_mem    (.clk(clk), .rst(rst));
-    soc #(.WORDS(WORDS), .HEXFILE("build/p_branch.hex")) c_branch (.clk(clk), .rst(rst));
-    soc #(.WORDS(WORDS), .HEXFILE("build/p_jump.hex"))   c_jump   (.clk(clk), .rst(rst));
+    soc #(.WORDS(WORDS), .HEXFILE("build/p_arith.hex"))  c_arith  (.clk(clk), .rst(rst),
+        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),  // no console yet (step 4)
+        .io_rdata(32'd0), .io_ready(1'b1));
+    soc #(.WORDS(WORDS), .HEXFILE("build/p_mem.hex"))    c_mem    (.clk(clk), .rst(rst),
+        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),  // no console yet (step 4)
+        .io_rdata(32'd0), .io_ready(1'b1));
+    soc #(.WORDS(WORDS), .HEXFILE("build/p_branch.hex")) c_branch (.clk(clk), .rst(rst),
+        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),  // no console yet (step 4)
+        .io_rdata(32'd0), .io_ready(1'b1));
+    soc #(.WORDS(WORDS), .HEXFILE("build/p_jump.hex"))   c_jump   (.clk(clk), .rst(rst),
+        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),  // no console yet (step 4)
+        .io_rdata(32'd0), .io_ready(1'b1));
 
     // ---- waveform probes for the c_mem walkthrough (tb/soc.gtkw) ----
     // $dumpvars skips arrays, so the register file and memory never show up in

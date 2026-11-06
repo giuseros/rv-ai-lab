@@ -67,7 +67,9 @@ make clean
     `0xAABBCCDD` (every byte negative) once hid a wrong-lane sign-extension bug.
   - `p_mem` stores non-zero bytes/halves to non-zero lanes; storing only `x0` (zero in
     every lane) hid that store data was never moved into the strobed lane.
-- Verify every new testbench against a reference implementation before handing it over.
+- Verify every new testbench before relying on it: against a reference implementation,
+  or by **mutation testing** — break the RTL in realistic ways and confirm each mutant
+  fails (done for `bus_tb`: six mutants, all caught).
 - The **retire log** (`retire_log` in `tb/soc_tb.v`, formatted by `tb/annotate.py`) is the
   reference for future microarchitectures: a pipelined core must retire exactly the same
   lines. It taps the CPU's ports (so stores to any target appear) and the `u_rf` write
@@ -92,7 +94,8 @@ make clean
 
 ## Status and roadmap
 - **Phase 1 — done.** Single-cycle core: regfile, alu, decoder, memory, control, cpu.
-- **Phase 2 — in progress (design agreed, not started).** Run C on a small SoC:
+- **Phase 2 — in progress.** Steps 1 (memory out of the cpu, `soc.v`) and 2 (`bus.v`,
+  `soc_map.vh`, `bus_tb`) done; next is step 3, `d_ready` + CPU stall. Run C on a small SoC:
   - Memory moves out of `cpu.v`. New `soc.v` wires `cpu` + `bus` + RAM. Instruction
     fetch stays a direct port to RAM; only the data side goes through the bus.
   - Bus interface (PicoRV32 native-interface style): `d_valid`, `d_addr`, `d_wstrb`
