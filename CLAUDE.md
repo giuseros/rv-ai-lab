@@ -80,7 +80,7 @@ make clean
   **masking**: a bus that leaks console stores into RAM is invisible at SoC level because
   `ram_delay` only writes on its own completed requests. Only `bus_tb` catches it, which
   is why unit tests stay even when system tests exist.
-- The **retire log** (`retire_log` in `tb/soc_tb.v`, formatted by `tb/annotate.py`) is the
+- The **retire log** (`retire_log` in `tb/tb_lib.v`, formatted by `tb/annotate.py`) is the
   reference for future microarchitectures: a pipelined core must retire exactly the same
   lines. It taps the CPU's ports (so stores to any target appear) and the `u_rf` write
   port; a pipelined core must export its own retire signals.
