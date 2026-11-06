@@ -29,7 +29,8 @@ module soc #(
     parameter WORDS       = 4096,  // RAM size in 32-bit words (4096 = 16 KiB)
     parameter HEXFILE     = "",    // program image loaded into RAM at time 0
     parameter RAM_LATENCY = 0,     // extra cycles per RAM access (0 = instant)
-    parameter IO_LATENCY  = 0      // extra cycles per console access
+    parameter IO_LATENCY  = 0,     // extra cycles per console access
+    parameter [31:0] RAM_FILL = 32'd0  // RAM contents outside the program image
 ) (
     input  wire        clk,
     input  wire        rst,
@@ -109,7 +110,7 @@ module soc #(
     // The RAM itself is passive and answers combinationally: it writes only the
     // lanes whose strobe is set (ram_delay sets them on the completing cycle
     // only), and an unrequested read is harmless.
-    memory #(.WORDS(WORDS), .HEXFILE(HEXFILE)) u_mem (
+    memory #(.WORDS(WORDS), .HEXFILE(HEXFILE), .FILL(RAM_FILL)) u_mem (
         .clk    (clk),
         .iaddr  (i_addr),
         .idata  (i_data),

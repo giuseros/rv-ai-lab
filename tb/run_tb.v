@@ -20,6 +20,9 @@ module run_tb;
     parameter HEXFILE = "";            // set by make
     parameter LAT     = 0;             // RAM and console latency
     parameter ECHO    = 1;             // print the console output as it happens
+    // RAM outside the program image starts as garbage, like real RAM: a program
+    // that reads memory it never wrote (an uncleared .bss, say) shows it.
+    parameter [31:0] FILL = 32'hDEAD_BEEF;
 
     localparam WORDS      = 4096;      // the full 16 KiB RAM
     localparam MAX_CYCLES = 1000000;
@@ -30,7 +33,8 @@ module run_tb;
     wire [7:0]  char_data;
     wire [31:0] exit_code;
 
-    soc #(.WORDS(WORDS), .HEXFILE(HEXFILE), .RAM_LATENCY(LAT), .IO_LATENCY(LAT)) dut (
+    soc #(.WORDS(WORDS), .HEXFILE(HEXFILE), .RAM_LATENCY(LAT), .IO_LATENCY(LAT),
+          .RAM_FILL(FILL)) dut (
         .clk(clk), .rst(rst),
         .char_valid(char_valid), .char_data(char_data),
         .exit_valid(exit_valid), .exit_code(exit_code));

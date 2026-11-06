@@ -49,7 +49,11 @@
 
 module memory #(
     parameter WORDS   = 4096,          // 4096 words = 16 KiB
-    parameter HEXFILE = ""             // "" means leave memory zeroed
+    parameter HEXFILE = "",            // "" means no program: every word is FILL
+    // Value of every word the program image does not cover. 0 by default; set
+    // it to a garbage pattern (e.g. 32'hDEAD_BEEF) to catch code that reads
+    // memory it never wrote, as real RAM powers up with garbage, not zeroes.
+    parameter [31:0] FILL = 32'd0
 ) (
     input  wire        clk,
 
@@ -78,7 +82,7 @@ module memory #(
     integer k;
     initial begin
         for (k=0; k<WORDS; k=k+1)
-            mem[k] = 32'd0;
+            mem[k] = FILL;
         if (HEXFILE!= "")
             $readmemh(HEXFILE, mem);
     end

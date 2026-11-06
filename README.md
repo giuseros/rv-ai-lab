@@ -31,6 +31,7 @@ assistant, working in Claude Code.
 ```sh
 sudo apt install -y iverilog gtkwave gcc-riscv64-unknown-elf
 
+make run PROG=hello            # compile and run sw/hello.c
 make run PROG=count            # run sw/count.S: output, exit code, cycles, CPI
 make run PROG=count TRACE=1    # ...plus every instruction it executed
 make run PROG=count LAT=3      # ...with memory answering 3 cycles late
@@ -39,8 +40,11 @@ make sim MOD=soc               # the system regression (also: regfile alu decode
 make wave MOD=soc              # open the waveform in gtkwave
 ```
 
-To write your own program, copy [`sw/count.S`](sw/count.S): a store of a byte to
-`0x1000_0000` prints it, a store of a word to `0x1000_0004` exits with that code.
+To write your own program, copy [`sw/hello.c`](sw/hello.c) (C, using
+[`sw/rt/soc.h`](sw/rt/soc.h): `puts`, `print_dec`, `exit`) or
+[`sw/count.S`](sw/count.S) (assembly: a store of a byte to `0x1000_0000` prints it,
+a store of a word to `0x1000_0004` exits with that code). There is no C library:
+RV32I has no multiply or divide instruction, so GCC calls libgcc for those.
 
 ## Layout
 
@@ -62,7 +66,7 @@ sw/    programs to run with `make run`
 
 - [x] Single-cycle RV32I core
 - [x] SoC: bus with valid/ready handshake, console, runner, slow-memory testing
-- [ ] Run C programs: `crt0`, linker script, `printf` to the console
+- [x] Run C programs compiled with GCC (`crt0`, linker script, a small runtime)
 - [ ] CSRs and exceptions (trap on illegal instructions), performance counters
 - [ ] A pipelined core, compared against the single-cycle one
 - [ ] Caches in front of a slower memory

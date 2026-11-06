@@ -35,13 +35,15 @@ sudo apt install -y iverilog gtkwave gcc-riscv64-unknown-elf universal-ctags
 ```
 rtl/<mod>.v      RTL                          rtl/*.vh   shared `define headers
 tb/<mod>_tb.v    self-checking testbench      tb/p_*.S   regression programs (soc_tb)
-tb/tb_lib.v      console_sink, retire_log     tb/run_tb.v  runs any one program
-sw/              programs to run (make run)   build/     generated artifacts (gitignored)
+tb/tb_lib.v      console_sink, retire_log     tb/c_*.c   C regression programs (soc_tb)
+tb/run_tb.v      runs any one program         sw/        programs to run (make run)
+sw/rt/           C runtime: crt0.S, link.ld, soc.h, runtime.c
+build/           generated artifacts (gitignored)
 ```
 ```sh
 make sim  MOD=<mod>        # compile rtl/<mod>.v + tb/<mod>_tb.v, run, self-check
 make wave MOD=<mod>        # same, then open build/<mod>.vcd in gtkwave
-make run   PROG=<prog>     # run sw/<prog>.S (or tb/): console output, exit code, CPI
+make run   PROG=<prog>     # run sw/<prog>.c|.S (or tb/): console output, exit code, CPI
                            #   LAT=1|3 for slow memory, TRACE=1 for the retire log
 make build/<prog>.hex      # assemble sw/ or tb/<prog>.S into a $readmemh image
 make dis   PROG=<prog>     # disassemble a test program
@@ -51,7 +53,9 @@ make clean
 ```
 `MOD=soc` compiles all of `rtl/*.v`. The `.S -> .hex` rule is `as -march=rv32i
 -mabi=ilp32` -> `ld -m elf32lriscv -Ttext=0` -> `objcopy -O binary` -> `od -An -tx4 -v -w4`
-(one little-endian 32-bit word per line).
+(one little-endian 32-bit word per line). C: `gcc -march=rv32i -mabi=ilp32 -O2
+-ffreestanding -nostdlib -nostartfiles -T sw/rt/link.ld crt0.S runtime.c prog.c -lgcc`
+(libgcc supplies mul/div; there is no libc, `soc.h` is the whole library).
 
 ## Conventions
 - **Strict Verilog-2005** (`-g2005`). No SystemVerilog, including packages — SV is
@@ -71,6 +75,9 @@ make clean
     `0xAABBCCDD` (every byte negative) once hid a wrong-lane sign-extension bug.
   - `p_mem` stores non-zero bytes/halves to non-zero lanes; storing only `x0` (zero in
     every lane) hid that store data was never moved into the strobed lane.
+- C programs run with RAM outside the image filled with `0xDEADBEEF` (`RAM_FILL`, and
+  `run_tb`'s default): real RAM powers up with garbage, and with zero-filled RAM a
+  crt0 that never cleared `.bss` passed every test.
 - Verify every new testbench before relying on it: against a reference implementation,
   or by **mutation testing** — break the RTL in realistic ways and confirm each mutant
   fails (done for `bus_tb` and the stall logic). A surviving mutant is either a test gap
@@ -108,7 +115,9 @@ make clean
 - **Phase 1 — done.** Single-cycle core: regfile, alu, decoder, memory, control, cpu.
 - **Phase 2 — in progress.** Done: step 1 (memory out of the cpu, `soc.v`), step 2
   (`bus.v`, `soc_map.vh`, `bus_tb`), step 3 (`d_ready` stall + `ram_delay`), step 4
-  (`console.v`, `p_hello.S` prints "hello"). Next is step 5: crt0, linker script, C.
+  (`console.v`, `p_hello.S` prints "hello"), step 5 (C: `sw/rt/`; `tb/c_basics.c`
+  self-checks mul/div via libgcc, 64-bit, recursion, .data/.bss, jump tables, function
+  pointers, and exits with its failure count). **Phase 2 is complete.** It built:
   Run C on a small SoC:
   - Memory moves out of `cpu.v`. New `soc.v` wires `cpu` + `bus` + RAM. Instruction
     fetch stays a direct port to RAM; only the data side goes through the bus.
