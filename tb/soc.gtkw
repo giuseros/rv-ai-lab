@@ -1,4 +1,4 @@
-[*] RVI32 soc_tb waveform layout: the c_mem SoC running tb/p_mem.S.
+[*] rv-ai-lab soc_tb waveform layout: the c_mem SoC running tb/p_mem.S.
 [*] Opened automatically by `make wave MOD=soc`. Zoom to 0-270 ns to see the program.
 [dumpfile] "build/soc.vcd"
 [timestart] 0

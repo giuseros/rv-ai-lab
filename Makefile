@@ -1,4 +1,4 @@
-# RVI32 — simulation flow (Icarus Verilog + GTKWave)
+# rv-ai-lab — simulation flow (Icarus Verilog + GTKWave)
 #
 # Usage:
 #   make sim   MOD=regfile    # compile rtl/<MOD>.v + tb/<MOD>_tb.v, run, self-check

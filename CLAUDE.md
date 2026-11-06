@@ -1,4 +1,4 @@
-# RVI32 — project context for Claude
+# rv-ai-lab — project context for Claude
 
 A RISC-V (RV32I) core in Verilog, used as a platform for learning RTL properly and for
 exploring microarchitecture. It started as a single-cycle core; the plan is to keep
@@ -128,6 +128,8 @@ make clean
     `console_sink` prints/records them. This is the template for future MMIO devices.
   - Then `crt0.S`, a linker script, `volatile` MMIO from C, and a hello-world.
   - The existing `p_*.S` programs and retire log must keep passing on the SoC.
-- **Then, open-ended:** performance counters (cycles, instret) to measure everything
-  after; a pipelined core (hazards, forwarding, branch prediction); a memory with latency
-  and caches in front of it; the M extension; a matmul accelerator; eventually an FPGA.
+- **Then, open-ended:** CSRs and exceptions (today an illegal instruction, misaligned
+  access or null-pointer write fails silently), which also gives performance counters
+  (`rdcycle`/`rdinstret`) to measure everything after; a pipelined core (hazards,
+  forwarding, branch prediction); caches in front of a slower memory; the M extension;
+  a matmul accelerator; eventually an FPGA.
