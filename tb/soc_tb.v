@@ -133,6 +133,9 @@ module soc_tb;
         chk(c_mem.u_cpu.u_rf.regs[13], 32'hFFFF8000, "mem x13 lh  high neg, low pos     ");
         chk(c_mem.u_cpu.u_rf.regs[15], 32'h0000007F, "mem x15 lb  byte 3 pos, byte 0 neg");
         chk(c_mem.u_cpu.u_rf.regs[16], 32'h00007F00, "mem x16 lh  high pos, low neg     ");
+        // store data must be placed in the lane the strobe selects
+        chk(c_mem.u_mem.mem[67],       32'h1234AB00, "mem mem[0x10C] sb/sh to lanes 1-3");
+        chk(c_mem.u_cpu.u_rf.regs[19], 32'h1234AB00, "mem x19 lw after sb/sh            ");
 
         $display("--- p_branch: all six branches, taken and not-taken -------");
         chk(c_branch.u_cpu.u_rf.regs[10], 32'd63, "branch x10 = 1+2+4+8+16+32       ");

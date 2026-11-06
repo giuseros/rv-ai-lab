@@ -60,11 +60,13 @@ make clean
 
 ## Testbench conventions
 - **Design test data so a wrong implementation gives a different answer.** Tests here
-  have passed for the wrong reason three times:
+  have passed for the wrong reason four times:
   - `control_tb` replays all vectors after 8 "poison" instructions, so a latched output
     can't hide behind a lucky predecessor (384 checks).
   - `p_mem` uses words where the selected byte's sign bit differs from byte 0's;
     `0xAABBCCDD` (every byte negative) once hid a wrong-lane sign-extension bug.
+  - `p_mem` stores non-zero bytes/halves to non-zero lanes; storing only `x0` (zero in
+    every lane) hid that store data was never moved into the strobed lane.
 - Verify every new testbench against a reference implementation before handing it over.
 - The **retire log** (`retire_log` in `tb/soc_tb.v`, formatted by `tb/annotate.py`) is the
   reference for future microarchitectures: a pipelined core must retire exactly the same

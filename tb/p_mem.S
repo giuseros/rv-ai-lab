@@ -27,5 +27,15 @@ _start:
     sw    x14, 8(x1)
     lb    x15, 11(x1)          # 0x0000007F  (byte 0 would say negative)
     lh    x16, 10(x1)          # 0x00007F00  (low half would say negative)
+
+    # Stores of NON-ZERO data to NON-ZERO lanes. Every sb/sh above stores x0,
+    # which is zero in every lane, so it cannot tell whether the store data was
+    # moved into the lane the strobe selects. These can.
+    li    x17, 0xAB
+    li    x18, 0x1234
+    sw    x0,  12(x1)          # word at 0x10C = 0
+    sb    x17, 13(x1)          # byte 0x10D <- AB    -> 0x0000AB00
+    sh    x18, 14(x1)          # half 0x10E <- 1234  -> 0x1234AB00
+    lw    x19, 12(x1)          # 0x1234AB00
 loop:
     jal   x0, loop

@@ -148,7 +148,12 @@ module cpu (
    assign d_wstrb = (mem_write && !rst) ? ((mem_size == `SZ_B) ? (4'b0001 << y[1:0]) : (mem_size == `SZ_H) ? (4'b0011 << y[1:0]) : 4'b1111) : 4'b0000;
    assign d_addr  = y;
    assign we = reg_write && !illegal && !rst;
-   assign d_wdata = rd2;
+   // Store data: replicate the byte/half into every lane, so whichever lane
+   // d_wstrb selects already holds the right data (sb to 0x...1 writes lane 1,
+   // which must contain rd2[7:0], not rd2[15:8]).
+   assign d_wdata = (mem_size == `SZ_B) ? {4{rd2[7:0]}}  :
+                    (mem_size == `SZ_H) ? {2{rd2[15:0]}} :
+                                          rd2;
    // a request only for real loads (result from memory) and stores
    assign d_valid = (mem_write || result_src == `RES_MEM) && !rst;
 
