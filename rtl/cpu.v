@@ -1,76 +1,26 @@
 // cpu.v — single-cycle RV32I core
 //
-// >>> YOUR JOB: implement the body. Everything it needs already exists and is
-//     verified: regfile, alu, decoder, control, memory. This module is the
-//     wiring plus six small pieces of new logic.
+// One instruction per clock: fetch, decode, execute, memory and writeback all
+// happen between two rising edges, and the PC, register file and any store
+// commit together on the closing edge.
 //
-// ===========================================================================
-// REQUIRED INSTANCE NAMES
-// ===========================================================================
-// tb/cpu_tb.v inspects architectural state through hierarchical references,
-// so two instance names are part of the contract:
+// The core has no memory of its own. It talks to the outside through two ports:
 //
-//     regfile ... u_rf     -> testbench reads u_rf.regs[n]
-//     memory  ... u_mem    -> testbench reads u_mem.mem[n]
+//   Fetch port   i_addr -> instruction address (the PC)
+//                i_data <- the instruction word at that address (same cycle)
 //
-// Name the other three whatever you like. Pass WORDS and HEXFILE straight
-// through to u_mem.
+//   Data port    d_valid -> there is a load or store this cycle
+//   (the bus)    d_addr  -> byte address (the ALU result)
+//                d_wstrb -> byte lanes to write; 4'b0000 means this is a load
+//                d_wdata -> store data, already placed in the right lane(s)
+//                d_rdata <- the aligned 32-bit word read from d_addr
+//                d_ready <- the target has completed the request this cycle
 //
-// ===========================================================================
-// WHAT YOU HAVE TO BUILD
-// ===========================================================================
+// d_valid is high only for real loads and stores: targets must ignore the bus
+// otherwise, because a device read can have side effects. d_ready is not used
+// yet (step 3 of Phase 2 adds the stall); soc.v currently ties it to 1.
 //
-// 1. THE PC. The only new state in the whole core. On posedge clk: if rst,
-//    PC <= 32'd0, else PC <= next_pc. Synchronous reset, active high.
-//    Non-blocking assignment. This is the one clocked block in this module
-//    (the regfile and memory have their own).
-//
-// 2. ALU OPERAND MUXES, driven by control.
-//       alu_a = `A_RS1 -> rd1,  `A_PC -> pc,   `A_ZERO -> 32'd0
-//       alu_b = `B_RS2 -> rd2,  `B_IMM -> imm
-//
-// 3. BRANCH COMPARATOR. The ALU is busy computing the target, so comparison
-//    is separate. Compute three facts from rd1/rd2 -- equal, signed less-than,
-//    unsigned less-than -- then select with funct3 and invert with funct3[0]:
-//       funct3[2] ? (funct3[1] ? ltu : lt) : eq,  then XOR funct3[0]
-//    Remember $signed() for the signed compare; rd1/rd2 are unsigned wires.
-//
-// 4. NEXT-PC MUX.
-//       jalr                  -> (rd1 + imm) & ~32'd1   <- note the masked LSB
-//       jump, or branch&taken -> alu_y                   (the ALU computed it)
-//       otherwise             -> pc + 4
-//    jalr is the only target the ALU result cannot be used for directly,
-//    because the spec requires clearing bit 0.
-//
-// 5. LOAD EXTRACT. u_mem returns the whole aligned 32-bit word. Select the
-//    byte or halfword named by alu_y[1:0], then sign- or zero-extend
-//    according to mem_size and load_unsigned. `SZ_W passes the word through.
-//       lb  at 0x...2 -> drdata[23:16], sign-extended
-//       lhu at 0x...2 -> drdata[31:16], zero-extended
-//
-// 6. STORE ALIGN + WSTRB. The reverse of 5, and it is two jobs:
-//    (a) replicate the data into the right lane(s) of dwdata, and
-//    (b) build wstrb from mem_size and alu_y[1:0]:
-//          `SZ_B -> 4'b0001 << alu_y[1:0]
-//          `SZ_H -> 4'b0011 << alu_y[1:0]      (alu_y[1] picks the half)
-//          `SZ_W -> 4'b1111
-//    wstrb must be 4'b0000 whenever mem_write is 0 -- a load must not write.
-//
-// 7. WRITEBACK MUX, driven by result_src: `RES_ALU -> alu_y,
-//    `RES_MEM -> the extracted load data, `RES_PC4 -> pc + 4.
-//    Gate the regfile write enable with reg_write AND NOT illegal.
-//
-// ===========================================================================
-// TRAPS
-// ===========================================================================
-//   - The instruction fetch address is pc, the data address is alu_y. Two
-//     different ports on u_mem; do not cross them.
-//   - `illegal` must suppress BOTH reg_write and mem_write.
-//   - rst must also hold wstrb at 0, or cycle 0 writes garbage to memory.
-//   - Every mux is combinational: `always @*` with defaults, or assigns with
-//     ternaries. Same latch rules as control.v.
-//   - The regfile write and the memory write both land on the same posedge
-//     that advances the PC. That is what "single cycle" means.
+// tb/soc_tb.v reaches into the register file, so it must stay named u_rf.
 
 `timescale 1ns/1ps
 `include "rv32i_defs.vh"
@@ -78,12 +28,21 @@
 `include "ctrl_defs.vh"
 
 
-module cpu #(
-    parameter WORDS   = 4096,
-    parameter HEXFILE = ""
-) (
-    input wire clk,
-    input wire rst
+module cpu (
+    input  wire        clk,
+    input  wire        rst,
+
+    // fetch port
+    output wire [31:0] i_addr,
+    input  wire [31:0] i_data,
+
+    // data port (to the bus)
+    output wire        d_valid,
+    output wire [31:0] d_addr,
+    output wire [3:0]  d_wstrb,
+    output wire [31:0] d_wdata,
+    input  wire [31:0] d_rdata,
+    input  wire        d_ready
 );
     reg [31:0] PC;
     wire [31:0] next_pc;
@@ -103,8 +62,8 @@ module cpu #(
     wire [6:0] opcode, funct7;
     wire [2:0] funct3;
     wire [4:0] rd, rs1, rs2;
-    wire [3:0] wstrb, alu_op;
-    wire [31:0] rd1, rd2, wd, daddr, drdata, dwdata, load_data;
+    wire [3:0] alu_op;
+    wire [31:0] rd1, rd2, wd, load_data;
     wire [2:0] fmt;
     wire reg_write, jalr, branch, load_unsigned, mem_write, illegal, zero, alu_b_src, jump, we;
     wire taken, lt, ltu, eq;
@@ -148,15 +107,9 @@ module cpu #(
        .fmt    (fmt    )
    );
 
-   memory #(.WORDS(WORDS), .HEXFILE(HEXFILE)) u_mem(
-       .clk    (clk    ),
-       .iaddr  (PC),
-       .idata  (instr),
-       .daddr  (daddr  ),
-       .drdata (drdata ),
-       .dwdata (dwdata ),
-       .wstrb  (wstrb  )
-   );
+   // fetch: the PC goes out, the instruction comes back in the same cycle
+   assign i_addr = PC;
+   assign instr  = i_data;
 
    regfile u_rf(
        .clk (clk ),
@@ -185,16 +138,18 @@ module cpu #(
    assign next_pc = (jalr) ? ((rd1 + imm) & ~32'd1) : (jump || (branch && taken)) ? y : PC + 32'd4;    
    assign idx_B = y[1:0];
    assign idx_H = y[1];
-   wire [7:0]  ld_byte = drdata[idx_B*8  +: 8];
-   wire [15:0] ld_half = drdata[idx_H*16 +: 16];
+   wire [7:0]  ld_byte = d_rdata[idx_B*8  +: 8];
+   wire [15:0] ld_half = d_rdata[idx_H*16 +: 16];
 
    assign load_data = (mem_size == `SZ_B) ? ((load_unsigned) ? {24'd0, ld_byte} : {{24{ld_byte[7]}}, ld_byte}) :
                       (mem_size == `SZ_H) ? ((load_unsigned) ? {16'd0, ld_half} : {{16{ld_half[15]}}, ld_half}) :
-                      drdata;
+                      d_rdata;
 
-   assign wstrb = (mem_write && !rst) ? ((mem_size == `SZ_B) ? (4'b0001 << y[1:0]) : (mem_size == `SZ_H) ? (4'b0011 << y[1:0]) : 4'b1111) : 4'b0000;
-   assign daddr = y;
+   assign d_wstrb = (mem_write && !rst) ? ((mem_size == `SZ_B) ? (4'b0001 << y[1:0]) : (mem_size == `SZ_H) ? (4'b0011 << y[1:0]) : 4'b1111) : 4'b0000;
+   assign d_addr  = y;
    assign we = reg_write && !illegal && !rst;
-   assign dwdata = rd2;
+   assign d_wdata = rd2;
+   // a request only for real loads (result from memory) and stores
+   assign d_valid = (mem_write || result_src == `RES_MEM) && !rst;
 
 endmodule

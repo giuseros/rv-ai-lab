@@ -1,0 +1,81 @@
+[*] RVI32 soc_tb waveform layout: the c_mem SoC running tb/p_mem.S.
+[*] Opened automatically by `make wave MOD=soc`. Zoom to 0-270 ns to see the program.
+[dumpfile] "build/soc.vcd"
+[timestart] 0
+[size] 1600 1000
+[sst_width] 220
+[signals_width] 230
+@200
+-Clock / reset
+@28
+soc_tb.c_mem.u_cpu.clk
+soc_tb.c_mem.u_cpu.rst
+@200
+-Fetch
+@22
+soc_tb.c_mem.u_cpu.PC[31:0]
+soc_tb.c_mem.u_cpu.instr[31:0]
+soc_tb.c_mem.u_cpu.next_pc[31:0]
+@200
+-Decode
+@22
+soc_tb.c_mem.u_cpu.rd[4:0]
+soc_tb.c_mem.u_cpu.rs1[4:0]
+soc_tb.c_mem.u_cpu.funct3[2:0]
+soc_tb.c_mem.u_cpu.imm[31:0]
+@200
+-Control
+@28
+soc_tb.c_mem.u_cpu.reg_write
+soc_tb.c_mem.u_cpu.mem_write
+soc_tb.c_mem.u_cpu.load_unsigned
+@22
+soc_tb.c_mem.u_cpu.mem_size[1:0]
+soc_tb.c_mem.u_cpu.result_src[1:0]
+@200
+-Execute (ALU)
+@22
+soc_tb.c_mem.u_cpu.a[31:0]
+soc_tb.c_mem.u_cpu.b[31:0]
+soc_tb.c_mem.u_cpu.y[31:0]
+@200
+-Memory (data port)
+@28
+soc_tb.c_mem.u_cpu.d_valid
+soc_tb.c_mem.u_cpu.d_ready
+@22
+soc_tb.c_mem.u_cpu.d_addr[31:0]
+soc_tb.c_mem.u_cpu.d_rdata[31:0]
+soc_tb.c_mem.u_cpu.idx_B[1:0]
+soc_tb.c_mem.u_cpu.load_data[31:0]
+@28
+soc_tb.c_mem.u_cpu.d_wstrb[3:0]
+@22
+soc_tb.c_mem.u_cpu.d_wdata[31:0]
+@200
+-Writeback
+@28
+soc_tb.c_mem.u_cpu.we
+@22
+soc_tb.c_mem.u_cpu.wd[31:0]
+@200
+-Registers (change on the edge that ENDS the instruction)
+@22
+soc_tb.c_mem_x1[31:0]
+soc_tb.c_mem_x2[31:0]
+soc_tb.c_mem_x3[31:0]
+soc_tb.c_mem_x4[31:0]
+soc_tb.c_mem_x5[31:0]
+soc_tb.c_mem_x6[31:0]
+soc_tb.c_mem_x7[31:0]
+soc_tb.c_mem_x8[31:0]
+soc_tb.c_mem_x9[31:0]
+soc_tb.c_mem_x10[31:0]
+@200
+-Memory words (by byte address)
+@22
+soc_tb.c_mem_m100[31:0]
+soc_tb.c_mem_m104[31:0]
+soc_tb.c_mem_m108[31:0]
+[pattern_trace] 1
+[pattern_trace] 0

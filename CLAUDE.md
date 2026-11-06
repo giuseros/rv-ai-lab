@@ -5,7 +5,10 @@ exploring microarchitecture. It started as a single-cycle core; the plan is to k
 going — pipelining, caches, branch prediction, and eventually custom units such as a
 matmul accelerator — and compare designs against each other.
 
-The owner writes the RTL to learn it, and may ask for help with mechanical parts.
+**Claude writes the RTL and the tests; the owner reviews to understand it.** (Phase 1's
+RTL was written by hand to learn Verilog; from Phase 2 on Claude implements.) Work in
+small, reviewable steps and explain each one: what every new signal is for, why the
+design is shaped that way, and what the test proves.
 Everything is **simulation-first**: no FPGA work until a design is verified in sim.
 
 ## Objectives
@@ -31,7 +34,7 @@ sudo apt install -y iverilog gtkwave gcc-riscv64-unknown-elf universal-ctags
 ## Layout and commands
 ```
 rtl/<mod>.v      RTL                          rtl/*.vh   shared `define headers
-tb/<mod>_tb.v    self-checking testbench      tb/p_*.S   test programs for the cpu
+tb/<mod>_tb.v    self-checking testbench      tb/p_*.S   test programs for the soc
 build/           all generated artifacts (gitignored)
 ```
 ```sh
@@ -42,7 +45,7 @@ make dis   PROG=<prog>     # disassemble a test program
 make trace PROG=<prog>     # retire log: one line per executed instruction + its effect
 make clean
 ```
-`MOD=cpu` compiles all of `rtl/*.v`. The `.S -> .hex` rule is `as -march=rv32i
+`MOD=soc` compiles all of `rtl/*.v`. The `.S -> .hex` rule is `as -march=rv32i
 -mabi=ilp32` -> `ld -m elf32lriscv -Ttext=0` -> `objcopy -O binary` -> `od -An -tx4 -v -w4`
 (one little-endian 32-bit word per line).
 
@@ -63,14 +66,16 @@ make clean
   - `p_mem` uses words where the selected byte's sign bit differs from byte 0's;
     `0xAABBCCDD` (every byte negative) once hid a wrong-lane sign-extension bug.
 - Verify every new testbench against a reference implementation before handing it over.
-- The **retire log** (`retire_log` in `tb/cpu_tb.v`, formatted by `tb/annotate.py`) is the
+- The **retire log** (`retire_log` in `tb/soc_tb.v`, formatted by `tb/annotate.py`) is the
   reference for future microarchitectures: a pipelined core must retire exactly the same
-  lines. It taps only the `u_rf`/`u_mem` ports; a pipelined core must export retire signals.
+  lines. It taps the CPU's ports (so stores to any target appear) and the `u_rf` write
+  port; a pipelined core must export its own retire signals.
 - Stimulus changes on the opposite clock edge from the one the DUT samples (e.g. reset
   is released on a negedge).
-- `cpu_tb` instantiates four cores, one per `tb/p_*.S`, and checks state through
-  hierarchical references, so **`cpu.v` must name its instances `u_rf` and `u_mem`**.
-  Never check `u_rf.regs[0]`: x0 is a read-mux constant, the array slot is X.
+- `soc_tb` instantiates four SoCs, one per `tb/p_*.S`, and checks state through
+  hierarchical references, so instance names are a contract: **`soc.v` names `u_cpu`
+  and `u_mem`; `cpu.v` names `u_rf`**. Never check `u_rf.regs[0]`: x0 is a read-mux
+  constant, the array slot is X.
 
 ## Design decisions worth knowing
 - **Memory** is one unified array (GCC emits one address space) with two async read
@@ -85,8 +90,24 @@ make clean
 
 ## Status and roadmap
 - **Phase 1 — done.** Single-cycle core: regfile, alu, decoder, memory, control, cpu.
-- **Phase 2 — next.** Run C: `crt0.S`, a linker script for the memory map, and
-  memory-mapped putchar/exit (the `tohost` pattern) so a program can print and halt.
+- **Phase 2 — in progress (design agreed, not started).** Run C on a small SoC:
+  - Memory moves out of `cpu.v`. New `soc.v` wires `cpu` + `bus` + RAM. Instruction
+    fetch stays a direct port to RAM; only the data side goes through the bus.
+  - Bus interface (PicoRV32 native-interface style): `d_valid`, `d_addr`, `d_wstrb`
+    (`0000` = load), `d_wdata` from the CPU; `d_rdata`, `d_ready` back. A transfer
+    happens in a cycle where valid and ready are both 1; while valid && !ready the CPU
+    holds the request (and its PC) unchanged. `d_valid` = load or store only, because
+    device reads can have side effects and slow targets/caches must not see fake reads.
+  - `d_ready` is in from day one: the single-cycle CPU stalls (holds PC, suppresses the
+    register write) until ready. A slow-RAM test must exercise that path.
+  - Memory map, decoded on `addr[31:28]`: `0` -> RAM (`0x0000_0000`-`0x0000_3FFF`,
+    partial decode aliases), `1` -> I/O: `0x1000_0000` console (store a byte = print),
+    `0x1000_0004` exit (store a word = end sim with that code). Unmapped: stores
+    dropped, loads return 0 (no traps yet).
+  - The console/exit device lives in the testbench (`$write`/`$finish` are sim-only);
+    `soc` exposes the I/O port. RTL stays synthesizable.
+  - Then `crt0.S`, a linker script, `volatile` MMIO from C, and a hello-world.
+  - The existing `p_*.S` programs and retire log must keep passing on the SoC.
 - **Then, open-ended:** performance counters (cycles, instret) to measure everything
   after; a pipelined core (hazards, forwarding, branch prediction); a memory with latency
   and caches in front of it; the M extension; a matmul accelerator; eventually an FPGA.
