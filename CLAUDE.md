@@ -73,14 +73,19 @@ make clean
   fails (done for `bus_tb` and the stall logic). A surviving mutant is either a test gap
   or *equivalent* (no test could ever see it): e.g. writing RAM on every waiting cycle is
   equivalent for RAM, but not for the console, so the console test must cover it.
+  Survivors also expose **dead code** (the console's redundant lane-0 check, removed) and
+  **masking**: a bus that leaks console stores into RAM is invisible at SoC level because
+  `ram_delay` only writes on its own completed requests. Only `bus_tb` catches it, which
+  is why unit tests stay even when system tests exist.
 - The **retire log** (`retire_log` in `tb/soc_tb.v`, formatted by `tb/annotate.py`) is the
   reference for future microarchitectures: a pipelined core must retire exactly the same
   lines. It taps the CPU's ports (so stores to any target appear) and the `u_rf` write
   port; a pipelined core must export its own retire signals.
 - Stimulus changes on the opposite clock edge from the one the DUT samples (e.g. reset
   is released on a negedge).
-- `soc_tb` runs every `tb/p_*.S` at RAM latency 0, 1 and 3 (12 SoCs, per-program checks
-  are `` `define `` macros taking the instance name) and checks state through
+- `soc_tb` runs every `tb/p_*.S` at memory latency 0, 1 and 3 (15 SoCs; per-program
+  checks are `` `define `` macros taking the instance name), runs until every SoC reaches
+  its final `jal x0, 0` (timeout otherwise), and checks state through
   hierarchical references, so instance names are a contract: **`soc.v` names `u_cpu`
   and `u_mem`; `cpu.v` names `u_rf`**. Never check `u_rf.regs[0]`: x0 is a read-mux
   constant, the array slot is X.
@@ -99,8 +104,9 @@ make clean
 ## Status and roadmap
 - **Phase 1 — done.** Single-cycle core: regfile, alu, decoder, memory, control, cpu.
 - **Phase 2 — in progress.** Done: step 1 (memory out of the cpu, `soc.v`), step 2
-  (`bus.v`, `soc_map.vh`, `bus_tb`), step 3 (`d_ready` stall + `ram_delay`). Next is
-  step 4, the console. Run C on a small SoC:
+  (`bus.v`, `soc_map.vh`, `bus_tb`), step 3 (`d_ready` stall + `ram_delay`), step 4
+  (`console.v`, `p_hello.S` prints "hello"). Next is step 5: crt0, linker script, C.
+  Run C on a small SoC:
   - Memory moves out of `cpu.v`. New `soc.v` wires `cpu` + `bus` + RAM. Instruction
     fetch stays a direct port to RAM; only the data side goes through the bus.
   - Bus interface (PicoRV32 native-interface style): `d_valid`, `d_addr`, `d_wstrb`
@@ -114,8 +120,9 @@ make clean
     partial decode aliases), `1` -> I/O: `0x1000_0000` console (store a byte = print),
     `0x1000_0004` exit (store a word = end sim with that code). Unmapped: stores
     dropped, loads return 0 (no traps yet).
-  - The console/exit device lives in the testbench (`$write`/`$finish` are sim-only);
-    `soc` exposes the I/O port. RTL stays synthesizable.
+  - The console is RTL (`console.v`): it decodes its two addresses and emits one-cycle
+    char/exit *events* on completed stores; `soc` exposes the events and the testbench's
+    `console_sink` prints/records them. This is the template for future MMIO devices.
   - Then `crt0.S`, a linker script, `volatile` MMIO from C, and a hello-world.
   - The existing `p_*.S` programs and retire log must keep passing on the SoC.
 - **Then, open-ended:** performance counters (cycles, instret) to measure everything

@@ -9,15 +9,16 @@
 //     +-----+  data port  +-----+  region 0  +-----------+   +-------+
 //     | cpu | ----------> | bus | ---------> | ram_delay | ->|  RAM  |
 //     +-----+ <---------- +-----+            +-----------+   +-------+
-//                            |      region 1
-//                            +----------------> io_* ports (to the testbench)
+//                            |    region 1   +---------+
+//                            +-------------> | console | --> char / exit events
+//                                            +---------+     (to the testbench)
 //
 // The bus routes each data request by address (see soc_map.vh). Instruction
 // fetch stays a direct connection to the RAM: code only ever comes from RAM.
 //
-// The I/O side leaves the SoC as a port. The console/exit device behind it
-// is simulation-only ($write, $finish), so it lives in the testbench and the
-// RTL stays synthesizable.
+// The console reports what the program printed and its exit code as events on
+// the SoC's outputs. Acting on them ($write, ending the simulation) is the
+// testbench's job; everything in here is plain RTL.
 //
 // tb/soc_tb.v reaches into this hierarchy, so the instance names u_cpu and
 // u_mem are part of its contract.
@@ -27,18 +28,17 @@
 module soc #(
     parameter WORDS       = 4096,  // RAM size in 32-bit words (4096 = 16 KiB)
     parameter HEXFILE     = "",    // program image loaded into RAM at time 0
-    parameter RAM_LATENCY = 0      // extra cycles per data access (0 = instant)
+    parameter RAM_LATENCY = 0,     // extra cycles per RAM access (0 = instant)
+    parameter IO_LATENCY  = 0      // extra cycles per console access
 ) (
     input  wire        clk,
     input  wire        rst,
 
-    // I/O target port (region 1): driven by the bus, answered from outside
-    output wire        io_valid,
-    output wire [31:0] io_addr,
-    output wire [3:0]  io_wstrb,
-    output wire [31:0] io_wdata,
-    input  wire [31:0] io_rdata,
-    input  wire        io_ready
+    // console events: one-cycle pulses, see console.v
+    output wire        char_valid,
+    output wire [7:0]  char_data,
+    output wire        exit_valid,
+    output wire [31:0] exit_code
 );
 
     // fetch port
@@ -59,6 +59,14 @@ module soc #(
     wire [31:0] ram_wdata;
     wire [31:0] ram_rdata;
     wire        ram_ready;
+
+    // bus -> console
+    wire        io_valid;
+    wire [31:0] io_addr;
+    wire [3:0]  io_wstrb;
+    wire [31:0] io_wdata;
+    wire [31:0] io_rdata;
+    wire        io_ready;
 
     // ram_delay -> RAM
     wire [3:0]  mem_wstrb;
@@ -109,6 +117,21 @@ module soc #(
         .drdata (mem_rdata),
         .dwdata (ram_wdata),
         .wstrb  (mem_wstrb)
+    );
+
+    console #(.LATENCY(IO_LATENCY)) u_console (
+        .clk        (clk),
+        .rst        (rst),
+        .valid      (io_valid),
+        .addr       (io_addr),
+        .wstrb      (io_wstrb),
+        .wdata      (io_wdata),
+        .rdata      (io_rdata),
+        .ready      (io_ready),
+        .char_valid (char_valid),
+        .char_data  (char_data),
+        .exit_valid (exit_valid),
+        .exit_code  (exit_code)
     );
 
 endmodule

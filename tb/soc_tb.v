@@ -2,10 +2,10 @@
 // Run: make sim MOD=soc       (waveform: make wave MOD=soc)
 //
 // Every program in tb/p_*.S runs on its own SoC, and the whole set runs three
-// times: with the RAM answering instantly (latency 0), after 1 extra cycle, and
-// after 3. All twelve SoCs share a clock and reset, run to completion (every
-// program ends in `loop: jal x0, loop`), and must end in exactly the same
-// architectural state. Latency may change how long a program takes, never what
+// times: with memory answering instantly (latency 0), after 1 extra cycle, and
+// after 3. All fifteen SoCs share a clock and reset and run until every one has
+// reached its final `loop: jal x0, loop` (or a timeout). They must end in
+// exactly the same architectural state, and p_hello must print the same text. Latency may change how long a program takes, never what
 // it computes: that is what the CPU's stall on d_ready guarantees.
 //
 // State is inspected through hierarchical references, so these instance names
@@ -74,10 +74,21 @@
     chk(C.u_cpu.u_rf.regs[1], 32'h00000008, {T, "jump x1  link address from jal"}); \
     chk(C.u_cpu.u_rf.regs[6], 32'h00000031, {T, "jump x6  odd jalr target"});
 
+// 0x1000_0000 and 0x1000_0004 alias RAM words 0 and 1 (partial decode), so a
+// bus that leaked console stores into the RAM would overwrite the program there.
+`define CHECK_HELLO(C, S, T) \
+    chk(C.u_cpu.i_data, 32'h0000006F, {T, "hello reached its final loop"}); \
+    chk_text(S.text,  "hello\n",       {T, "hello printed the expected text"}); \
+    chk(S.count,      32'd6,           {T, "hello printed exactly 6 characters"}); \
+    chk(S.exited,     32'd1,           {T, "hello wrote the exit register"}); \
+    chk(S.code,       32'd42,          {T, "hello exit code"}); \
+    chk(C.u_mem.mem[0], 32'h100002B7,  {T, "hello console stores left RAM alone"}); \
+    chk(C.u_mem.mem[1], 32'h02800313,  {T, "hello exit store left RAM alone"});
+
 module soc_tb;
 
     localparam WORDS  = 256;     // 1 KiB, enough for these programs
-    localparam CYCLES = 400;     // ample even at latency 3
+    localparam MAX_CYCLES = 2000;  // timeout: a hung CPU fails instead of waiting forever
 
     reg clk, rst;
     integer errors = 0;
@@ -86,54 +97,74 @@ module soc_tb;
     // RAM latency 0 (instant)
     soc #(.WORDS(WORDS), .HEXFILE("build/p_arith.hex"), .RAM_LATENCY(0)) c_arith (
         .clk(clk), .rst(rst),
-        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),   // no console yet (step 4)
-        .io_rdata(32'd0), .io_ready(1'b1));
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_mem.hex"), .RAM_LATENCY(0)) c_mem (
         .clk(clk), .rst(rst),
-        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),   // no console yet (step 4)
-        .io_rdata(32'd0), .io_ready(1'b1));
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_branch.hex"), .RAM_LATENCY(0)) c_branch (
         .clk(clk), .rst(rst),
-        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),   // no console yet (step 4)
-        .io_rdata(32'd0), .io_ready(1'b1));
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_jump.hex"), .RAM_LATENCY(0)) c_jump (
         .clk(clk), .rst(rst),
-        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),   // no console yet (step 4)
-        .io_rdata(32'd0), .io_ready(1'b1));
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
     // RAM latency 1: every load/store waits 1 extra cycle
     soc #(.WORDS(WORDS), .HEXFILE("build/p_arith.hex"), .RAM_LATENCY(1)) l1_arith (
         .clk(clk), .rst(rst),
-        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),   // no console yet (step 4)
-        .io_rdata(32'd0), .io_ready(1'b1));
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_mem.hex"), .RAM_LATENCY(1)) l1_mem (
         .clk(clk), .rst(rst),
-        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),   // no console yet (step 4)
-        .io_rdata(32'd0), .io_ready(1'b1));
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_branch.hex"), .RAM_LATENCY(1)) l1_branch (
         .clk(clk), .rst(rst),
-        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),   // no console yet (step 4)
-        .io_rdata(32'd0), .io_ready(1'b1));
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_jump.hex"), .RAM_LATENCY(1)) l1_jump (
         .clk(clk), .rst(rst),
-        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),   // no console yet (step 4)
-        .io_rdata(32'd0), .io_ready(1'b1));
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
     // RAM latency 3: every load/store waits 3 extra cycles
     soc #(.WORDS(WORDS), .HEXFILE("build/p_arith.hex"), .RAM_LATENCY(3)) l3_arith (
         .clk(clk), .rst(rst),
-        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),   // no console yet (step 4)
-        .io_rdata(32'd0), .io_ready(1'b1));
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_mem.hex"), .RAM_LATENCY(3)) l3_mem (
         .clk(clk), .rst(rst),
-        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),   // no console yet (step 4)
-        .io_rdata(32'd0), .io_ready(1'b1));
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_branch.hex"), .RAM_LATENCY(3)) l3_branch (
         .clk(clk), .rst(rst),
-        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),   // no console yet (step 4)
-        .io_rdata(32'd0), .io_ready(1'b1));
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_jump.hex"), .RAM_LATENCY(3)) l3_jump (
         .clk(clk), .rst(rst),
-        .io_valid(), .io_addr(), .io_wstrb(), .io_wdata(),   // no console yet (step 4)
-        .io_rdata(32'd0), .io_ready(1'b1));
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
+
+    // p_hello: prints on the console, at the same three latencies (RAM and I/O).
+    wire        c_hello_cv, c_hello_ev;
+    wire [7:0]  c_hello_ch;
+    wire [31:0] c_hello_code;
+    soc #(.WORDS(WORDS), .HEXFILE("build/p_hello.hex"), .RAM_LATENCY(0), .IO_LATENCY(0)) c_hello (
+        .clk(clk), .rst(rst),
+        .char_valid(c_hello_cv), .char_data(c_hello_ch),
+        .exit_valid(c_hello_ev), .exit_code(c_hello_code));
+    console_sink #(.ECHO(1)) s_c_hello (.clk(clk), .rst(rst),
+        .char_valid(c_hello_cv), .char_data(c_hello_ch),
+        .exit_valid(c_hello_ev), .exit_code(c_hello_code));
+    wire        l1_hello_cv, l1_hello_ev;
+    wire [7:0]  l1_hello_ch;
+    wire [31:0] l1_hello_code;
+    soc #(.WORDS(WORDS), .HEXFILE("build/p_hello.hex"), .RAM_LATENCY(1), .IO_LATENCY(1)) l1_hello (
+        .clk(clk), .rst(rst),
+        .char_valid(l1_hello_cv), .char_data(l1_hello_ch),
+        .exit_valid(l1_hello_ev), .exit_code(l1_hello_code));
+    console_sink #(.ECHO(0)) s_l1_hello (.clk(clk), .rst(rst),
+        .char_valid(l1_hello_cv), .char_data(l1_hello_ch),
+        .exit_valid(l1_hello_ev), .exit_code(l1_hello_code));
+    wire        l3_hello_cv, l3_hello_ev;
+    wire [7:0]  l3_hello_ch;
+    wire [31:0] l3_hello_code;
+    soc #(.WORDS(WORDS), .HEXFILE("build/p_hello.hex"), .RAM_LATENCY(3), .IO_LATENCY(3)) l3_hello (
+        .clk(clk), .rst(rst),
+        .char_valid(l3_hello_cv), .char_data(l3_hello_ch),
+        .exit_valid(l3_hello_ev), .exit_code(l3_hello_code));
+    console_sink #(.ECHO(0)) s_l3_hello (.clk(clk), .rst(rst),
+        .char_valid(l3_hello_cv), .char_data(l3_hello_ch),
+        .exit_valid(l3_hello_ev), .exit_code(l3_hello_code));
 
     // ---- waveform probes for the c_mem walkthrough (tb/soc.gtkw) ----
     // $dumpvars skips arrays, so the register file and memory never show up in
@@ -217,6 +248,40 @@ module soc_tb;
         .daddr(l3_jump.u_cpu.d_addr), .dwdata(l3_jump.u_cpu.d_wdata), .wstrb(l3_jump.u_cpu.d_wstrb),
         .valid(l3_jump.u_cpu.d_valid), .ready(l3_jump.u_cpu.d_ready));
 
+    retire_log #(.NAME("p_hello")) t_c_hello (.clk(clk), .rst(rst),
+        .pc(c_hello.u_cpu.i_addr), .instr(c_hello.u_cpu.i_data),
+        .we(c_hello.u_cpu.u_rf.we), .rd(c_hello.u_cpu.u_rf.rd), .wd(c_hello.u_cpu.u_rf.wd),
+        .daddr(c_hello.u_cpu.d_addr), .dwdata(c_hello.u_cpu.d_wdata), .wstrb(c_hello.u_cpu.d_wstrb),
+        .valid(c_hello.u_cpu.d_valid), .ready(c_hello.u_cpu.d_ready));
+    retire_log #(.NAME("p_hello@1")) t_l1_hello (.clk(clk), .rst(rst),
+        .pc(l1_hello.u_cpu.i_addr), .instr(l1_hello.u_cpu.i_data),
+        .we(l1_hello.u_cpu.u_rf.we), .rd(l1_hello.u_cpu.u_rf.rd), .wd(l1_hello.u_cpu.u_rf.wd),
+        .daddr(l1_hello.u_cpu.d_addr), .dwdata(l1_hello.u_cpu.d_wdata), .wstrb(l1_hello.u_cpu.d_wstrb),
+        .valid(l1_hello.u_cpu.d_valid), .ready(l1_hello.u_cpu.d_ready));
+    retire_log #(.NAME("p_hello@3")) t_l3_hello (.clk(clk), .rst(rst),
+        .pc(l3_hello.u_cpu.i_addr), .instr(l3_hello.u_cpu.i_data),
+        .we(l3_hello.u_cpu.u_rf.we), .rd(l3_hello.u_cpu.u_rf.rd), .wd(l3_hello.u_cpu.u_rf.wd),
+        .daddr(l3_hello.u_cpu.d_addr), .dwdata(l3_hello.u_cpu.d_wdata), .wstrb(l3_hello.u_cpu.d_wstrb),
+        .valid(l3_hello.u_cpu.d_valid), .ready(l3_hello.u_cpu.d_ready));
+
+    // Every SoC has reached its final `jal x0, 0` (=== so X counts as not yet).
+    wire all_done =
+        (c_arith.u_cpu.i_data === 32'h0000006F) &&
+        (c_mem.u_cpu.i_data === 32'h0000006F) &&
+        (c_branch.u_cpu.i_data === 32'h0000006F) &&
+        (c_jump.u_cpu.i_data === 32'h0000006F) &&
+        (c_hello.u_cpu.i_data === 32'h0000006F) &&
+        (l1_arith.u_cpu.i_data === 32'h0000006F) &&
+        (l1_mem.u_cpu.i_data === 32'h0000006F) &&
+        (l1_branch.u_cpu.i_data === 32'h0000006F) &&
+        (l1_jump.u_cpu.i_data === 32'h0000006F) &&
+        (l1_hello.u_cpu.i_data === 32'h0000006F) &&
+        (l3_arith.u_cpu.i_data === 32'h0000006F) &&
+        (l3_mem.u_cpu.i_data === 32'h0000006F) &&
+        (l3_branch.u_cpu.i_data === 32'h0000006F) &&
+        (l3_jump.u_cpu.i_data === 32'h0000006F) &&
+        (l3_hello.u_cpu.i_data === 32'h0000006F);
+
     initial clk = 0;
     always #5 clk = ~clk;
 
@@ -231,6 +296,19 @@ module soc_tb;
     end
     endtask
 
+    task chk_text(input [8*64:1] got, input [8*64:1] exp, input [8*44:1] what);
+    begin
+        checks = checks + 1;
+        if (got !== exp) begin
+            $display("FAIL: %0s = \"%0s\", expected \"%0s\"", what, got, exp);
+            errors = errors + 1;
+        end else
+            $display("  ok: %0s", what);
+    end
+    endtask
+
+    integer cycles;
+
     initial begin
         $dumpfile("build/soc.vcd");
         $dumpvars(0, soc_tb);
@@ -241,24 +319,39 @@ module soc_tb;
         rst = 1'b1;
         repeat (2) @(posedge clk);
         @(negedge clk) rst = 1'b0;
-        repeat (CYCLES) @(posedge clk);
+
+        $display("--- p_hello console output (latency 0) ---");
+        cycles = 0;
+        while (!all_done && cycles < MAX_CYCLES) begin
+            @(posedge clk);
+            cycles = cycles + 1;
+        end
+        repeat (2) @(posedge clk);   // let the final loop retire
         #1;
+        if (!all_done) begin
+            $display("TIMEOUT: not every SoC reached its final loop in %0d cycles", MAX_CYCLES);
+            errors = errors + 1;
+        end else
+            $display("--- all SoCs finished after %0d cycles ---", cycles);
 
         $display("--- RAM latency 0 -------------------------------------------");
         `CHECK_ARITH(c_arith, "L0 ")
         `CHECK_MEM(c_mem, "L0 ")
         `CHECK_BRANCH(c_branch, "L0 ")
         `CHECK_JUMP(c_jump, "L0 ")
+        `CHECK_HELLO(c_hello, s_c_hello, "L0 ")
         $display("--- RAM latency 1 -------------------------------------------");
         `CHECK_ARITH(l1_arith, "L1 ")
         `CHECK_MEM(l1_mem, "L1 ")
         `CHECK_BRANCH(l1_branch, "L1 ")
         `CHECK_JUMP(l1_jump, "L1 ")
+        `CHECK_HELLO(l1_hello, s_l1_hello, "L1 ")
         $display("--- RAM latency 3 -------------------------------------------");
         `CHECK_ARITH(l3_arith, "L3 ")
         `CHECK_MEM(l3_mem, "L3 ")
         `CHECK_BRANCH(l3_branch, "L3 ")
         `CHECK_JUMP(l3_jump, "L3 ")
+        `CHECK_HELLO(l3_hello, s_l3_hello, "L3 ")
 
         $display("--------------------------------------------------");
         if (errors == 0) $display("SOC: ALL TESTS PASSED (%0d checks)", checks);
@@ -267,6 +360,43 @@ module soc_tb;
         $finish;
     end
 
+endmodule
+
+
+// ===========================================================================
+// console_sink -- the testbench end of a SoC's console.
+//
+// Watches the console's events and records what happened: every character
+// printed (newest in the low byte of `text`), how many, and the exit code.
+// With ECHO set it also writes the characters to the simulator's output.
+// Sampled on the posedge, like retire_log: an event belongs to the store that
+// completes on that edge.
+// ===========================================================================
+module console_sink #(parameter ECHO = 0) (
+    input wire        clk, rst,
+    input wire        char_valid,
+    input wire [7:0]  char_data,
+    input wire        exit_valid,
+    input wire [31:0] exit_code
+);
+    reg [8*64:1] text;
+    integer      count;
+    reg          exited;
+    reg [31:0]   code;
+
+    initial begin text = 0; count = 0; exited = 1'b0; code = 32'd0; end
+
+    always @(posedge clk) if (!rst) begin
+        if (char_valid) begin
+            text  = {text[8*63:1], char_data};
+            count = count + 1;
+            if (ECHO) $write("%c", char_data);
+        end
+        if (exit_valid) begin
+            exited = 1'b1;
+            code   = exit_code;
+        end
+    end
 endmodule
 
 
