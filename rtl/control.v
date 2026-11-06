@@ -75,6 +75,7 @@ module control (
     output reg        alu_b_src,      // `B_RS2 / `B_IMM
     output reg  [3:0] alu_op,         // see alu_ops.vh
     output reg  [1:0] result_src,     // `RES_ALU / `RES_MEM / `RES_PC4
+    output reg        mem_read,       // 1 = this is a load
     output reg        mem_write,      // 1 = this is a store
     output reg  [1:0] mem_size,       // `SZ_B / `SZ_H / `SZ_W
     output reg        load_unsigned,  // 1 = lbu/lhu (zero-extend, not sign)
@@ -90,6 +91,7 @@ module control (
         jalr = 1'b0;
         branch = 1'b0;
         load_unsigned = 1'b0;
+        mem_read = 1'b0;
         mem_write = 1'b0;
         reg_write = 1'b0;
         load_unsigned = 1'b0;
@@ -143,6 +145,7 @@ module control (
                     alu_b_src = `B_IMM;
                     alu_op = `ALU_ADD;
                     result_src = `RES_MEM;
+                    mem_read = 1'b1;
                     load_unsigned = funct3[2];
                     mem_size = funct3[1:0];
                 end 

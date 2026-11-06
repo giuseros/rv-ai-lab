@@ -24,7 +24,7 @@ module control_tb;
     reg  [6:0] opcode, funct7;
     reg  [2:0] funct3;
 
-    wire       reg_write, alu_b_src, mem_write, load_unsigned;
+    wire       reg_write, alu_b_src, mem_read, mem_write, load_unsigned;
     wire       branch, jump, jalr, illegal;
     wire [1:0] alu_a_src, result_src, mem_size;
     wire [3:0] alu_op;
@@ -42,14 +42,14 @@ module control_tb;
     control dut (
         .opcode(opcode), .funct3(funct3), .funct7(funct7),
         .reg_write(reg_write), .alu_a_src(alu_a_src), .alu_b_src(alu_b_src),
-        .alu_op(alu_op), .result_src(result_src), .mem_write(mem_write),
+        .alu_op(alu_op), .result_src(result_src), .mem_read(mem_read), .mem_write(mem_write),
         .mem_size(mem_size), .load_unsigned(load_unsigned), .branch(branch),
         .jump(jump), .jalr(jalr), .illegal(illegal)
     );
 
     // the twelve outputs packed into one word, MSB..LSB
-    wire [17:0] act = {reg_write, alu_a_src, alu_b_src, alu_op, result_src,
-                       mem_write, mem_size, load_unsigned, branch, jump, jalr,
+    wire [18:0] act = {reg_write, alu_a_src, alu_b_src, alu_op, result_src,
+                       mem_read, mem_write, mem_size, load_unsigned, branch, jump, jalr,
                        illegal};
 
     // ---- pretty-printers for the multi-bit fields ----
@@ -97,7 +97,7 @@ module control_tb;
     endtask
 
     task chk(input [8*14:1] name, input [6:0] op, input [2:0] f3,
-             input [6:0] f7, input [17:0] exp);
+             input [6:0] f7, input [18:0] exp);
         begin
             poison(pz);
             opcode = op; funct3 = f3; funct7 = f7;
@@ -109,19 +109,20 @@ module control_tb;
                 errors = errors + 1;
                 $display("FAIL: %0s  opcode=%b funct3=%b funct7=%b  [after poison %0d]",
                          name, op, f3, f7, pz);
-                dbit("reg_write    ", exp[17],    reg_write);
-                if (exp[16:15] !== alu_a_src)
+                dbit("reg_write    ", exp[18],    reg_write);
+                if (exp[17:16] !== alu_a_src)
                     $display("          alu_a_src     expected %0s, got %0s",
-                             aname(exp[16:15]), aname(alu_a_src));
-                if (exp[14] !== alu_b_src)
+                             aname(exp[17:16]), aname(alu_a_src));
+                if (exp[15] !== alu_b_src)
                     $display("          alu_b_src     expected %0s, got %0s",
-                             bname(exp[14]), bname(alu_b_src));
-                if (exp[13:10] !== alu_op)
+                             bname(exp[15]), bname(alu_b_src));
+                if (exp[14:11] !== alu_op)
                     $display("          alu_op        expected %0s, got %0s",
-                             oname(exp[13:10]), oname(alu_op));
-                if (exp[9:8] !== result_src)
+                             oname(exp[14:11]), oname(alu_op));
+                if (exp[10:9] !== result_src)
                     $display("          result_src    expected %0s, got %0s",
-                             rname(exp[9:8]), rname(result_src));
+                             rname(exp[10:9]), rname(result_src));
+                dbit("mem_read     ", exp[8], mem_read);
                 dbit("mem_write    ", exp[7], mem_write);
                 if (exp[6:5] !== mem_size)
                     $display("          mem_size      expected %0s, got %0s",
@@ -136,31 +137,31 @@ module control_tb;
     endtask
 
     // ---- expected-value builders, one per instruction class ----
-    function [17:0] R(input [3:0] o);
-        R = {1'b1, `A_RS1, `B_RS2, o, `RES_ALU, 1'b0, `SZ_W, 1'b0, 4'b0000};
+    function [18:0] R(input [3:0] o);
+        R = {1'b1, `A_RS1, `B_RS2, o, `RES_ALU, 1'b0, 1'b0, `SZ_W, 1'b0, 4'b0000};
     endfunction
-    function [17:0] I(input [3:0] o);
-        I = {1'b1, `A_RS1, `B_IMM, o, `RES_ALU, 1'b0, `SZ_W, 1'b0, 4'b0000};
+    function [18:0] I(input [3:0] o);
+        I = {1'b1, `A_RS1, `B_IMM, o, `RES_ALU, 1'b0, 1'b0, `SZ_W, 1'b0, 4'b0000};
     endfunction
-    function [17:0] LD(input [1:0] sz, input u);
-        LD = {1'b1, `A_RS1, `B_IMM, `ALU_ADD, `RES_MEM, 1'b0, sz, u, 4'b0000};
+    function [18:0] LD(input [1:0] sz, input u);
+        LD = {1'b1, `A_RS1, `B_IMM, `ALU_ADD, `RES_MEM, 1'b1, 1'b0, sz, u, 4'b0000};
     endfunction
-    function [17:0] ST(input [1:0] sz);
-        ST = {1'b0, `A_RS1, `B_IMM, `ALU_ADD, `RES_ALU, 1'b1, sz, 1'b0, 4'b0000};
+    function [18:0] ST(input [1:0] sz);
+        ST = {1'b0, `A_RS1, `B_IMM, `ALU_ADD, `RES_ALU, 1'b0, 1'b1, sz, 1'b0, 4'b0000};
     endfunction
-    function [17:0] BR;
+    function [18:0] BR;
         input dummy;
-        BR = {1'b0, `A_PC, `B_IMM, `ALU_ADD, `RES_ALU, 1'b0, `SZ_W, 1'b0, 4'b1000};
+        BR = {1'b0, `A_PC, `B_IMM, `ALU_ADD, `RES_ALU, 1'b0, 1'b0, `SZ_W, 1'b0, 4'b1000};
     endfunction
-    function [17:0] BAD;
+    function [18:0] BAD;
         input dummy;
-        BAD = {1'b0, `A_RS1, `B_RS2, `ALU_ADD, `RES_ALU, 1'b0, `SZ_W, 1'b0, 4'b0001};
+        BAD = {1'b0, `A_RS1, `B_RS2, `ALU_ADD, `RES_ALU, 1'b0, 1'b0, `SZ_W, 1'b0, 4'b0001};
     endfunction
 
-    localparam [17:0] E_LUI   = {1'b1, `A_ZERO, `B_IMM, `ALU_ADD, `RES_ALU, 1'b0, `SZ_W, 1'b0, 4'b0000};
-    localparam [17:0] E_AUIPC = {1'b1, `A_PC,   `B_IMM, `ALU_ADD, `RES_ALU, 1'b0, `SZ_W, 1'b0, 4'b0000};
-    localparam [17:0] E_JAL   = {1'b1, `A_PC,   `B_IMM, `ALU_ADD, `RES_PC4, 1'b0, `SZ_W, 1'b0, 4'b0100};
-    localparam [17:0] E_JALR  = {1'b1, `A_RS1,  `B_IMM, `ALU_ADD, `RES_PC4, 1'b0, `SZ_W, 1'b0, 4'b0010};
+    localparam [18:0] E_LUI   = {1'b1, `A_ZERO, `B_IMM, `ALU_ADD, `RES_ALU, 1'b0, 1'b0, `SZ_W, 1'b0, 4'b0000};
+    localparam [18:0] E_AUIPC = {1'b1, `A_PC,   `B_IMM, `ALU_ADD, `RES_ALU, 1'b0, 1'b0, `SZ_W, 1'b0, 4'b0000};
+    localparam [18:0] E_JAL   = {1'b1, `A_PC,   `B_IMM, `ALU_ADD, `RES_PC4, 1'b0, 1'b0, `SZ_W, 1'b0, 4'b0100};
+    localparam [18:0] E_JALR  = {1'b1, `A_RS1,  `B_IMM, `ALU_ADD, `RES_PC4, 1'b0, 1'b0, `SZ_W, 1'b0, 4'b0010};
 
     localparam [6:0] F0 = 7'b0000000, F1 = 7'b0100000;
 

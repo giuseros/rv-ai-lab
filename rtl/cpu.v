@@ -72,7 +72,7 @@ module cpu (
     wire [3:0] alu_op;
     wire [31:0] rd1, rd2, wd, load_data;
     wire [2:0] fmt;
-    wire reg_write, jalr, branch, load_unsigned, mem_write, illegal, zero, alu_b_src, jump, we;
+    wire reg_write, jalr, branch, load_unsigned, mem_read, mem_write, illegal, zero, alu_b_src, jump, we;
     wire taken, lt, ltu, eq;
 
 
@@ -93,6 +93,7 @@ module cpu (
         .alu_b_src     (alu_b_src     ),
         .alu_op        (alu_op        ),
         .result_src    (result_src    ),
+        .mem_read      (mem_read      ),
         .mem_write     (mem_write     ),
         .mem_size      (mem_size      ),
         .load_unsigned (load_unsigned ),
@@ -162,7 +163,7 @@ module cpu (
    assign d_wdata = (mem_size == `SZ_B) ? {4{rd2[7:0]}}  :
                     (mem_size == `SZ_H) ? {2{rd2[15:0]}} :
                                           rd2;
-   // a request only for real loads (result from memory) and stores
-   assign d_valid = (mem_write || result_src == `RES_MEM) && !rst;
+   // a request only for real loads and stores
+   assign d_valid = (mem_read || mem_write) && !rst;
 
 endmodule
