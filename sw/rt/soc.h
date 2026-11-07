@@ -29,6 +29,13 @@ static inline __attribute__((noreturn)) void exit(int code)
 }
 
 // sw/rt/runtime.c
+// printf supports %d %i %u %x %X %c %s %p %%, '-' and '0' flags, a width, and
+// l/ll (ll = 64-bit). No precision, no floating point. The format attribute
+// makes GCC check the arguments against the format string (-Wformat).
+int printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+int snprintf(char *buf, size_t size, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
+// NOTE: unlike the standard puts, this one does NOT add a newline.
 void puts(const char *s);                // print s (no newline added)
 void print_dec(int32_t v);               // print v in decimal
 void print_hex(uint32_t v);              // print v as 0x followed by 8 hex digits

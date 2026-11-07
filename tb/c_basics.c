@@ -14,6 +14,7 @@
 //                    .rodata, then jalr to the loaded address
 //   function ptrs    indirect calls: jalr through a register
 //   struct copy      GCC may call memcpy itself
+//   printf           the runtime's formatter, checked through snprintf
 //
 // Inputs come from volatile globals so -O2 cannot compute the answers at
 // compile time. It prints one line per test and exits with the number of
@@ -22,6 +23,7 @@
 #include "soc.h"
 
 static int failures;
+static char text[48];              // snprintf output; see the printf tests
 
 static void check(const char *name, uint32_t got, uint32_t want)
 {
@@ -40,10 +42,25 @@ static void check(const char *name, uint32_t got, uint32_t want)
     putchar('\n');
 }
 
+static void check_str(const char *name, const char *got, const char *want)
+{
+    if (memcmp(got, want, strlen(want) + 1) == 0) {     // +1: the '\0' too
+        puts("  ok  ");
+        puts(name);
+    } else {
+        failures++;
+        printf("FAIL  %s: got \"%s\", want \"%s\"", name, got, want);
+    }
+    putchar('\n');
+}
+
 // ---- inputs the compiler cannot see through ----
 volatile int32_t  vi_a = 12345, vi_b = 6789, vi_neg = -100, vi_seven = 7;
 volatile uint32_t vu_max = 0xFFFFFFFFu, vu_ten = 10;
 volatile int      vi_n = 15;
+volatile int64_t  vl_big = -9000000000LL;
+volatile uint64_t vl_max = 0xFFFFFFFFFFFFFFFFull;
+volatile int32_t  vi_min = (int32_t)0x80000000;
 
 // ---- .data and .bss ----
 int32_t data_word = 0x12345678;              // initialised: comes from the image
@@ -144,6 +161,27 @@ int main(void)
     memset(buf, 'x', sizeof buf);
     memcpy(buf, "abc", 3);
     check("memset/memcpy",      (uint32_t)memcmp(buf, "abcxxxxx", 8), 0u);
+
+    // printf's formatting engine, checked through snprintf (same code path).
+    // int32_t is `long` on this toolchain, so int32_t values are cast to int to
+    // match %d (GCC checks the types: format attribute in soc.h).
+    snprintf(text, sizeof text, "%d", (int)vi_neg);
+    check_str("printf %d negative", text, "-100");
+    snprintf(text, sizeof text, "%d", (int)vi_min);
+    check_str("printf %d INT32_MIN", text, "-2147483648");
+    snprintf(text, sizeof text, "%u %x %X", (unsigned)vu_max,
+             (unsigned)(vu_max - 0x21524110u), (unsigned)(0xbeefu + vi_seven - 7));
+    check_str("printf %u %x %X", text, "4294967295 deadbeef BEEF");
+    snprintf(text, sizeof text, "[%5d][%-5d][%05d][%*d]",
+             (int)vi_a, (int)vi_seven, (int)vi_neg, 4, (int)vi_seven);
+    check_str("printf widths, flags, *", text, "[12345][7    ][-0100][   7]");
+    snprintf(text, sizeof text, "%s|%c|%%|%p", "str", 'z', (void *)0x1000);
+    check_str("printf %s %c %% %p", text, "str|z|%|0x00001000");
+    snprintf(text, sizeof text, "%lld %llu", (long long)vl_big, (unsigned long long)vl_max);
+    check_str("printf 64-bit %lld %llu", text, "-9000000000 18446744073709551615");
+    check("snprintf truncates, returns full length",
+          (uint32_t)snprintf(text, 4, "abcdef"), 6u);
+    check_str("snprintf truncated text", text, "abc");
 
     // and the console's own number printing (print_dec divides by 10)
     puts("  print_dec(-2147483648) = ");

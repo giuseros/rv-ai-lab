@@ -52,7 +52,7 @@ $(BUILD)/%.hex: tb/%.S | $(BUILD)
 # link.ld memory layout, soc.h + runtime.c library) and linked with libgcc,
 # which supplies multiply/divide on RV32I. No C library: -ffreestanding.
 CFLAGS := -march=rv32i -mabi=ilp32 -O2 -ffreestanding -nostdlib -nostartfiles \
-          -Wall -Wextra -Isw/rt
+          -Wall -Wextra -Wshadow -Isw/rt
 # Code and data share one RAM with no protection, so its single segment really is
 # read-write-execute; the linker's warning about that is expected here.
 LDFLAGS := -Wl,--no-warn-rwx-segments

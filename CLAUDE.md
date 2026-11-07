@@ -55,7 +55,11 @@ make clean
 -mabi=ilp32` -> `ld -m elf32lriscv -Ttext=0` -> `objcopy -O binary` -> `od -An -tx4 -v -w4`
 (one little-endian 32-bit word per line). C: `gcc -march=rv32i -mabi=ilp32 -O2
 -ffreestanding -nostdlib -nostartfiles -T sw/rt/link.ld crt0.S runtime.c prog.c -lgcc`
-(libgcc supplies mul/div; there is no libc, `soc.h` is the whole library).
+(libgcc supplies mul/div; there is no libc, `soc.h` is the whole library: `printf` and
+`snprintf` (`%d %i %u %x %X %c %s %p %%`, `-`/`0` flags, width, `ll`; no `%f`, no
+precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec`,
+`print_hex`, `exit`, `mem*`, `strlen`). `-Wshadow` is on. On this toolchain `int32_t` is
+`long`, so `printf("%d", an_int32)` warns: cast to `(int)` or use `%ld`.
 
 ## Conventions
 - **Strict Verilog-2005** (`-g2005`). No SystemVerilog, including packages — SV is
@@ -117,7 +121,8 @@ make clean
   (`bus.v`, `soc_map.vh`, `bus_tb`), step 3 (`d_ready` stall + `ram_delay`), step 4
   (`console.v`, `p_hello.S` prints "hello"), step 5 (C: `sw/rt/`; `tb/c_basics.c`
   self-checks mul/div via libgcc, 64-bit, recursion, .data/.bss, jump tables, function
-  pointers, and exits with its failure count). **Phase 2 is complete.** It built:
+  pointers, and printf via snprintf, then exits with its failure count). **Phase 2 is
+  complete.** It built:
   Run C on a small SoC:
   - Memory moves out of `cpu.v`. New `soc.v` wires `cpu` + `bus` + RAM. Instruction
     fetch stays a direct port to RAM; only the data side goes through the bus.
