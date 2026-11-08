@@ -1,6 +1,1 @@
-build/*.vvp
-build/*.vcd
-build/*.o
-build/*.elf
-build/*.bin
-build/*.hex
+build/

@@ -30,6 +30,11 @@ Implications for how things are built now:
 ```sh
 sudo apt install -y iverilog gtkwave gcc-riscv64-unknown-elf universal-ctags
 ```
+FPGA: Quartus Prime Lite 25.1std (MAX 10 + Cyclone V only, no Questa) in
+`~/altera_lite/25.1std`; the Makefile's `QUARTUS` points at its `quartus/bin`, so it
+needn't be on `PATH`. USB-Blaster access needs a udev rule (vendor `09fb`, mode 0666).
+**Vendor tools are used from the command line only, never their IDEs** (no GUI project
+settings, no Platform Designer): projects are generated from the Tcl files in `boards/`.
 
 ## Layout and commands
 ```
@@ -38,7 +43,9 @@ tb/<mod>_tb.v    self-checking testbench      tb/p_*.S   regression programs (so
 tb/tb_lib.v      console_sink, retire_log     tb/c_*.c   C regression programs (soc_tb)
 tb/run_tb.v      runs any one program         sw/        programs to run (make run)
 sw/rt/           C runtime: crt0.S, link.ld, soc.h, runtime.c
-build/           generated artifacts (gitignored)
+boards/<board>/  one folder per FPGA board: <top>_top.v + <top>_top_tb.v (blinky = smoke
+                 test, written first for every board), pins.tcl, timing.sdc, build.tcl
+build/           generated artifacts (gitignored); Quartus runs in build/<board>/<top>/
 ```
 ```sh
 make sim  MOD=<mod>        # compile rtl/<mod>.v + tb/<mod>_tb.v, run, self-check
@@ -49,6 +56,9 @@ make build/<prog>.hex      # assemble sw/ or tb/<prog>.S into a $readmemh image
 make dis   PROG=<prog>     # disassemble a test program
 make trace PROG=<prog>     # retire log: one line per executed instruction + its effect
                            #   ends with instructions, cycles and CPI; LAT=1|3 for slow RAM
+make fpga-sim BOARD=<b> TOP=<t>   # simulate boards/<b>/<t>_top.v with its testbench
+make fpga     BOARD=<b> TOP=<t>   # Quartus: synthesise, fit, assemble, time; report LEs/Fmax
+make program  BOARD=<b> TOP=<t>   # load the .sof over JTAG (volatile: gone at power-off)
 make clean
 ```
 `MOD=soc` compiles all of `rtl/*.v`. The `.S -> .hex` rule is `as -march=rv32i
@@ -142,6 +152,32 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     `console_sink` prints/records them. This is the template for future MMIO devices.
   - Then `crt0.S`, a linker script, `volatile` MMIO from C, and a hello-world.
   - The existing `p_*.S` programs and retire log must keep passing on the SoC.
+- **Phase 3 — FPGA bring-up (next).** Target several boards, starting with the
+  **Terasic DE10-Lite** (Altera MAX 10 10M50, Quartus Prime Lite, built-in USB-Blaster).
+  Later the **DE10-Nano** (Cyclone V SoC; its USB serial port belongs to the ARM side) and
+  a **Waveshare DVK600 + Core3S500E** (Spartan-3E XC3S500E: Xilinx ISE 14.7 only, external
+  JTAG programmer, RS-232 via an onboard SP3232; its block RAM has no byte write enables, so
+  memory must be four 8-bit lanes). Plan:
+  - Layout: everything reusable is plain RTL in `rtl/` with unit tests in `tb/` (a UART,
+    a clocked RAM, `hex7seg.v` are not "FPGA code"; test: could another board use it
+    unchanged?). `boards/<board>/` holds only board-specific things: tops (pins, clock,
+    reset, polarity), their testbenches, pins/timing/build scripts. Quartus output never
+    lands in the source tree.
+  - Bring-up order per board: `blinky_top` first (clock, LEDs, switches, displays, keys),
+    then the SoC top. **DE10-Lite blinky: done** (97 LEs, 44 regs, Fmax 212 MHz, verified
+    on the board). Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
+    iverilog `-g2005` stays the strict language check.
+  - Memory must read on the clock edge (block RAM). Loads: one extra cycle through the
+    existing `d_ready` stall. Fetch: present the *next* PC to the RAM one edge early, so
+    the instruction for the current PC is ready at the start of the cycle.
+  - DE10-Lite output: 7-segment + LEDs first; then `printf` through **our own UART**
+    (`rtl/uart.v`, a console-style MMIO device) to a PL2303 USB-serial board set to 3.3 V
+    on the GPIO header (GND, TXD, RXD only; never its VCCIO). The board's only USB port is
+    the USB-Blaster (no USB-serial chip), and its JTAG UART would need Platform Designer.
+    The same UART serves the DVK600 through its RS-232 port.
+  - Simulate every board top before building it. The owner does what needs hands or sudo
+    (installs, udev, wiring); Claude writes, simulates, builds, reports resources/timing,
+    and programs over JTAG.
 - **Then, open-ended:** CSRs and exceptions (today an illegal instruction, misaligned
   access or null-pointer write fails silently), which also gives performance counters
   (`rdcycle`/`rdinstret`) to measure everything after; a pipelined core (hazards,

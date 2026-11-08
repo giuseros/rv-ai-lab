@@ -101,9 +101,53 @@ run: $(BUILD)/$(PROG).hex
 $(BUILD)/$(MOD).vvp: $(SRCS) | $(BUILD)
 	iverilog $(IVFLAGS) -o $@ $(SRCS)
 
+# ---- FPGA (Phase 3) --------------------------------------------------------
+# Each board is a folder boards/<BOARD>/ holding its tops (<TOP>_top.v), their
+# testbenches (<TOP>_top_tb.v), pins.tcl, timing.sdc and build.tcl. Quartus runs
+# from the command line only, inside build/<BOARD>/<TOP>/.
+#   make fpga-sim BOARD=de10-lite TOP=blinky   # simulate the top first
+#   make fpga     BOARD=de10-lite TOP=blinky   # synthesise, fit, report
+#   make program  BOARD=de10-lite TOP=blinky   # load it into the FPGA (until power-off)
+QUARTUS  ?= $(HOME)/altera_lite/25.1std/quartus/bin
+BOARD    ?= de10-lite
+TOP      ?= blinky
+FPGA_DIR := $(BUILD)/$(BOARD)/$(TOP)
+SOF      := $(FPGA_DIR)/output_files/$(TOP)_top.sof
+FPGA_SRC := $(wildcard rtl/*.v rtl/*.vh) \
+            $(filter-out %_tb.v,$(wildcard boards/$(BOARD)/*.v)) \
+            $(wildcard boards/$(BOARD)/*.tcl boards/$(BOARD)/*.sdc)
+
+fpga-sim: | $(BUILD)
+	@iverilog $(IVFLAGS) -s $(TOP)_top_tb -o $(BUILD)/$(BOARD)-$(TOP).vvp \
+	    $(wildcard rtl/*.v) boards/$(BOARD)/$(TOP)_top.v boards/$(BOARD)/$(TOP)_top_tb.v
+	@vvp -n $(BUILD)/$(BOARD)-$(TOP).vvp
+
+# The full Quartus log goes to quartus.log; on failure, its errors are shown.
+$(SOF): $(FPGA_SRC)
+	@mkdir -p $(FPGA_DIR)
+	@echo "quartus: building $(BOARD) $(TOP)_top (log: $(FPGA_DIR)/quartus.log)"
+	@cd $(FPGA_DIR) && $(QUARTUS)/quartus_sh -t $(CURDIR)/boards/$(BOARD)/build.tcl \
+	    $(TOP) $(CURDIR) > quartus.log 2>&1 \
+	 || { grep -E "^Error|BUILD FAILED" quartus.log; exit 1; }
+
+# What it costs and how fast it could run, from Quartus's reports.
+fpga: $(SOF)
+	@echo "--- $(BOARD) $(TOP)_top ---"
+	@grep -E "Total logic elements|Total registers|Total pins|Total memory bits" \
+	    $(FPGA_DIR)/output_files/$(TOP)_top.fit.summary | sed 's/^ */  /'
+	@grep -A4 "Fmax Summary" $(FPGA_DIR)/output_files/$(TOP)_top.sta.rpt \
+	    | grep -E "MHz" | head -1 | awk -F';' '{print "  Fmax (slow corner):" $$2 "(clock " $$4 ")"}'
+	@grep -E "Warning \(332" $(FPGA_DIR)/quartus.log | head -5 || true
+
+program: $(SOF)
+	$(QUARTUS)/quartus_pgm -m jtag -c 1 -o "p;$(SOF)"
+
+.PHONY: fpga-sim fpga program
+
 $(BUILD):
 	@mkdir -p $(BUILD)
 
 clean:
 	@rm -rf $(BUILD)/*.vvp $(BUILD)/*.vcd $(BUILD)/*.o $(BUILD)/*.elf $(BUILD)/*.bin $(BUILD)/*.hex
+	@rm -rf $(BUILD)/*/
 	@echo "cleaned"
