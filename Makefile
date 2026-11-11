@@ -19,11 +19,13 @@ BUILD := build
 # purpose: this project is for learning Verilog.
 IVFLAGS := -g2005 -Wall -I rtl
 
-# soc.v instantiates every other module, so it needs the whole rtl/ tree.
+# soc.v instantiates every other module, so it needs the whole rtl/ tree. Every
+# testbench may use tb/tb_lib.v; -s picks <MOD>_tb as the one top module, so the
+# library's (and rtl/'s) other modules are just parsed, never run.
 ifeq ($(MOD),soc)
 SRCS := $(wildcard rtl/*.v) tb/tb_lib.v tb/$(MOD)_tb.v
 else
-SRCS := rtl/$(MOD).v tb/$(MOD)_tb.v
+SRCS := rtl/$(MOD).v tb/tb_lib.v tb/$(MOD)_tb.v
 endif
 
 # Test programs: .S -> .hex (one 32-bit little-endian word per line, for
@@ -99,7 +101,7 @@ run: $(BUILD)/$(PROG).hex
 .PHONY: run
 
 $(BUILD)/$(MOD).vvp: $(SRCS) | $(BUILD)
-	iverilog $(IVFLAGS) -o $@ $(SRCS)
+	iverilog $(IVFLAGS) -s $(MOD)_tb -o $@ $(SRCS)
 
 # ---- FPGA (Phase 3) --------------------------------------------------------
 # Each board is a folder boards/<BOARD>/ holding its tops (<TOP>_top.v), their
@@ -119,7 +121,7 @@ FPGA_SRC := $(wildcard rtl/*.v rtl/*.vh) \
 
 fpga-sim: | $(BUILD)
 	@iverilog $(IVFLAGS) -s $(TOP)_top_tb -o $(BUILD)/$(BOARD)-$(TOP).vvp \
-	    $(wildcard rtl/*.v) boards/$(BOARD)/$(TOP)_top.v boards/$(BOARD)/$(TOP)_top_tb.v
+	    $(wildcard rtl/*.v) tb/tb_lib.v boards/$(BOARD)/$(TOP)_top.v boards/$(BOARD)/$(TOP)_top_tb.v
 	@vvp -n $(BUILD)/$(BOARD)-$(TOP).vvp
 
 # The full Quartus log goes to quartus.log; on failure, its errors are shown.

@@ -1,1 +1,4 @@
 build/
+# Vendor documents (board manuals, datasheets): copyrighted, kept locally only.
+# boards/<board>/reference/README.md says where to get each one.
+boards/*/reference/*.pdf

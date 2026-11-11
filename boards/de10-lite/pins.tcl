@@ -30,3 +30,16 @@ bus HEX2 {PIN_B20 PIN_A20 PIN_B19 PIN_A21 PIN_B21 PIN_C22 PIN_B22 PIN_A19}
 bus HEX3 {PIN_F21 PIN_E22 PIN_E21 PIN_C19 PIN_C20 PIN_D19 PIN_E17 PIN_D22}
 bus HEX4 {PIN_F18 PIN_E20 PIN_E19 PIN_J18 PIN_H19 PIN_F19 PIN_F20 PIN_F17}
 bus HEX5 {PIN_J20 PIN_K20 PIN_L18 PIN_N18 PIN_M20 PIN_N19 PIN_N20 PIN_L19}
+
+# ---- serial port on the 2x20 GPIO header (JP1) ----
+# Not part of the board: our own wiring to a USB-serial adapter (a PL2303 set to
+# 3.3 V; its VCCIO pin is left unconnected). Header pins from the manual's
+# Figure 3-18, FPGA pins from its Table 3-7 (signal names GPIO_25, GPIO_27):
+#   JP1 pin 28  GPIO_[25]  UART_TX  FPGA output -> adapter RXD
+#   JP1 pin 30  GND                 ground      -- adapter GND
+#   JP1 pin 32  GPIO_[27]  UART_RX  FPGA input  <- adapter TXD
+# The weak pull-up holds UART_RX at idle (high) when nothing is plugged in, so a
+# floating wire doesn't look like traffic.
+pin UART_TX PIN_Y7
+pin UART_RX PIN_Y6
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to UART_RX

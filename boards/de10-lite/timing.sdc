@@ -9,6 +9,8 @@ derive_clock_uncertainty
 
 # Switches and keys change whenever a person moves them, unrelated to the clock
 # (KEY[0] goes through a synchroniser in the RTL), and LEDs and displays are
-# watched by eyes. No timing relationship to check on any of them.
-set_false_path -from [get_ports {KEY[*] SW[*]}]
-set_false_path -to   [get_ports {LEDR[*] HEX*}]
+# watched by eyes. The serial line carries no clock either: UART_RX is
+# synchronised in the RTL, and a receiver samples UART_TX in the middle of bits
+# that last thousands of nanoseconds. No timing relationship to check on any of them.
+set_false_path -from [get_ports {KEY[*] SW[*] UART_RX}]
+set_false_path -to   [get_ports {LEDR[*] HEX* UART_TX}]

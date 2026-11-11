@@ -40,15 +40,17 @@ settings, no Platform Designer): projects are generated from the Tcl files in `b
 ```
 rtl/<mod>.v      RTL                          rtl/*.vh   shared `define headers
 tb/<mod>_tb.v    self-checking testbench      tb/p_*.S   regression programs (soc_tb)
-tb/tb_lib.v      console_sink, retire_log     tb/c_*.c   C regression programs (soc_tb)
+tb/tb_lib.v      console_sink, retire_log,    tb/c_*.c   C regression programs (soc_tb)
+                 uart_monitor (PC end of a serial line)
 tb/run_tb.v      runs any one program         sw/        programs to run (make run)
 sw/rt/           C runtime: crt0.S, link.ld, soc.h, runtime.c
 boards/<board>/  one folder per FPGA board: <top>_top.v + <top>_top_tb.v (blinky = smoke
-                 test, written first for every board), pins.tcl, timing.sdc, build.tcl
+                 test, written first for every board), pins.tcl, timing.sdc, build.tcl,
+                 reference/README.md (where to get the vendor manuals; PDFs gitignored)
 build/           generated artifacts (gitignored); Quartus runs in build/<board>/<top>/
 ```
 ```sh
-make sim  MOD=<mod>        # compile rtl/<mod>.v + tb/<mod>_tb.v, run, self-check
+make sim  MOD=<mod>        # compile rtl/<mod>.v + tb/tb_lib.v + tb/<mod>_tb.v, run, check
 make wave MOD=<mod>        # same, then open build/<mod>.vcd in gtkwave
 make run   PROG=<prog>     # run sw/<prog>.c|.S (or tb/): console output, exit code, CPI
                            #   LAT=1|3 for slow memory, TRACE=1 for the retire log
@@ -165,19 +167,26 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     lands in the source tree.
   - Bring-up order per board: `blinky_top` first (clock, LEDs, switches, displays, keys),
     then the SoC top. **DE10-Lite blinky: done** (97 LEs, 44 regs, Fmax 212 MHz, verified
-    on the board). Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
+    on the board). **DE10-Lite UART TX: done**: `rtl/uart_tx.v` (8N1, valid/ready) and
+    `uart_hello_top` (a numbered line per second; 210 LEs, Fmax 131 MHz), verified on the
+    board with the PL2303 on JP1 pins 28 (TX -> adapter RXD), 30 (GND), 32 (RX <- adapter
+    TXD); RX is only an activity LED until there is a `uart_rx`. Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
     iverilog `-g2005` stays the strict language check.
   - Memory must read on the clock edge (block RAM). Loads: one extra cycle through the
     existing `d_ready` stall. Fetch: present the *next* PC to the RAM one edge early, so
     the instruction for the current PC is ready at the start of the cycle.
   - DE10-Lite output: 7-segment + LEDs first; then `printf` through **our own UART**
-    (`rtl/uart.v`, a console-style MMIO device) to a PL2303 USB-serial board set to 3.3 V
+    (`rtl/uart_tx.v` behind a console-style MMIO device: next step) to a PL2303 USB-serial board set to 3.3 V
     on the GPIO header (GND, TXD, RXD only; never its VCCIO). The board's only USB port is
     the USB-Blaster (no USB-serial chip), and its JTAG UART would need Platform Designer.
     The same UART serves the DVK600 through its RS-232 port.
   - Simulate every board top before building it. The owner does what needs hands or sudo
     (installs, udev, wiring); Claude writes, simulates, builds, reports resources/timing,
     and programs over JTAG.
+  - Board gotchas: a `.sof` is lost at power-off, so reprogram after every replug; if
+    `jtagconfig` hangs after a replug, a stale `jtagd` holds the old USB handle (kill it).
+    Reading the serial port: `stty ... raw clocal` (without `clocal` a read can wait for
+    carrier forever); a shell older than the `dialout` membership needs `sg dialout -c`.
 - **Then, open-ended:** CSRs and exceptions (today an illegal instruction, misaligned
   access or null-pointer write fails silently), which also gives performance counters
   (`rdcycle`/`rdinstret`) to measure everything after; a pipelined core (hazards,

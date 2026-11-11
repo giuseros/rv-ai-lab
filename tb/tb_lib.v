@@ -1,8 +1,9 @@
-// tb_lib.v — testbench helpers shared by soc_tb.v and run_tb.v
+// tb_lib.v — testbench helpers shared by the testbenches
 //
 //   console_sink  records (and optionally echoes) what a SoC's console printed
 //   retire_log    prints one line per retired instruction (tb/annotate.py
 //                 formats it)
+//   uart_monitor  a model of the PC's end of a serial line: decodes 8N1 bytes
 `timescale 1ns/1ps
 
 // ===========================================================================
@@ -106,5 +107,59 @@ module retire_log #(parameter [8*16:1] NAME = "") (
             $display("RETIRE halt %0d %0d", n, cycles);   // instructions, cycles
         end
       end
+    end
+endmodule
+
+
+// ===========================================================================
+// uart_monitor -- decodes an 8N1 serial line, the way the PL2303 on the other
+// end of the wire does.
+//
+// It knows only the nominal baud rate, never the transmitter's cycle count, so
+// it checks the transmitter's timing independently: on each falling edge (a
+// start bit) it waits half a bit to the middle, then samples every following
+// bit in its middle, one bit period apart. If the transmitter's bits were too
+// long or too short, the sample points drift into the wrong bits.
+//
+// Records: bytes[] in order, count, the start-to-start time of each byte
+// (period[]; for back-to-back bytes it should be 10 bit periods), framing
+// errors (stop bit not 1) and false starts (line low for less than half a bit:
+// a glitch). With ECHO it also writes the characters to the simulator output.
+// ===========================================================================
+module uart_monitor #(parameter BAUD = 115_200, parameter ECHO = 0) (
+    input wire line
+);
+    real    bit_ns;
+    reg [7:0] bytes  [0:255];
+    real      period [0:255];       // ns since the previous start bit; 0 = first
+    integer count, framing_errors, false_starts, k;
+    real    t_start, t_prev;
+    reg [7:0] b;
+
+    initial begin
+        bit_ns = 1.0e9 / BAUD;
+        count = 0; framing_errors = 0; false_starts = 0; t_prev = -1.0;
+    end
+
+    always begin
+        @(negedge line);
+        t_start = $realtime;
+        #(bit_ns / 2.0);                        // middle of the start bit
+        if (line !== 1'b0)
+            false_starts = false_starts + 1;
+        else begin
+            for (k = 0; k < 8; k = k + 1) begin
+                #(bit_ns);
+                b[k] = line;                    // d0 first
+            end
+            #(bit_ns);                          // middle of the stop bit
+            if (line !== 1'b1)
+                framing_errors = framing_errors + 1;
+            bytes[count & 255]  = b;
+            period[count & 255] = (t_prev < 0.0) ? 0.0 : t_start - t_prev;
+            t_prev = t_start;
+            count  = count + 1;
+            if (ECHO) $write("%c", b);
+        end
     end
 endmodule
