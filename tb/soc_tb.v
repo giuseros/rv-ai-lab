@@ -1,16 +1,18 @@
 // soc_tb.v — system testbench: the core plus its memory, running programs.
 // Run: make sim MOD=soc       (waveform: make wave MOD=soc)
 //
-// Every program in tb/p_*.S runs on its own SoC, and the whole set runs three
-// times: with memory answering instantly (latency 0), after 1 extra cycle, and
-// after 3. All eighteen SoCs share a clock and reset and run until every one has
+// Every program in tb/p_*.S runs on its own SoC, and the whole set runs four
+// times: with memory answering instantly (latency 0), after 1 extra cycle,
+// after 3, and on the clocked RAM an FPGA has (ram_sync: fetch one edge early,
+// loads one cycle late). All eighteen SoCs share a clock and reset and run until every one has
 // reached its final `loop: jal x0, loop` (or a timeout). They must end in
 // exactly the same architectural state, and p_hello must print the same text. Latency may change how long a program takes, never what
 // it computes: that is what the CPU's stall on d_ready guarantees.
 //
 // State is inspected through hierarchical references, so these instance names
 // are part of the contract:
-//     soc.v:  cpu    -> u_cpu    memory -> u_mem   (read as <soc>.u_mem.mem[n])
+//     soc.v:  cpu    -> u_cpu    RAM -> g_mem.u_mem  (word n read as <soc>.g_mem.word(n),
+//                                                     whichever RAM it is)
 //     cpu.v:  regfile -> u_rf                      (read as <soc>.u_cpu.u_rf.regs[n])
 //
 // Expected values were derived from the RISC-V spec and cross-checked against
@@ -55,12 +57,12 @@
     chk(C.u_cpu.u_rf.regs[8], 32'h0000AABB, {T, "mem x8  lhu upper half, unsigned"}); \
     chk(C.u_cpu.u_rf.regs[9], 32'hAABB00DD, {T, "mem x9  after sb x0,1(x1)"}); \
     chk(C.u_cpu.u_rf.regs[10], 32'h000000DD, {T, "mem x10 after sh x0,2(x1)"}); \
-    chk(C.u_mem.mem[64], 32'h000000DD, {T, "mem mem[0x100] final"}); \
+    chk(C.g_mem.word(64), 32'h000000DD, {T, "mem mem[0x100] final"}); \
     chk(C.u_cpu.u_rf.regs[12], 32'hFFFFFF80, {T, "mem x12 lb  byte 3 neg, byte 0 pos"}); \
     chk(C.u_cpu.u_rf.regs[13], 32'hFFFF8000, {T, "mem x13 lh  high neg, low pos"}); \
     chk(C.u_cpu.u_rf.regs[15], 32'h0000007F, {T, "mem x15 lb  byte 3 pos, byte 0 neg"}); \
     chk(C.u_cpu.u_rf.regs[16], 32'h00007F00, {T, "mem x16 lh  high pos, low neg"}); \
-    chk(C.u_mem.mem[67], 32'h1234AB00, {T, "mem mem[0x10C] sb/sh to lanes 1-3"}); \
+    chk(C.g_mem.word(67), 32'h1234AB00, {T, "mem mem[0x10C] sb/sh to lanes 1-3"}); \
     chk(C.u_cpu.u_rf.regs[19], 32'h1234AB00, {T, "mem x19 lw after sb/sh"}); \
     chk(C.u_cpu.u_rf.regs[20], 32'h00000100, {T, "mem x20 lw x20,0(x20) (base == dest)"});
 
@@ -82,8 +84,8 @@
     chk(S.count,      32'd6,           {T, "hello printed exactly 6 characters"}); \
     chk(S.exited,     32'd1,           {T, "hello wrote the exit register"}); \
     chk(S.code,       32'd42,          {T, "hello exit code"}); \
-    chk(C.u_mem.mem[0], 32'h100002B7,  {T, "hello console stores left RAM alone"}); \
-    chk(C.u_mem.mem[1], 32'h02800313,  {T, "hello exit store left RAM alone"});
+    chk(C.g_mem.word(0), 32'h100002B7,  {T, "hello console stores left RAM alone"}); \
+    chk(C.g_mem.word(1), 32'h02800313,  {T, "hello exit store left RAM alone"});
 
 // The console also sends every character out of the SoC's serial line, and the
 // CPU waits for the line when it prints faster than the line sends. A
@@ -234,9 +236,49 @@ module soc_tb;
         .char_valid(l3_cb_cv), .char_data(l3_cb_ch),
         .exit_valid(l3_cb_ev), .exit_code(l3_cb_code));
 
+    // Clocked RAM (ram_sync), RAM latency 0: what an FPGA build runs.
+    soc #(.WORDS(WORDS), .HEXFILE("build/p_arith.hex"), .SYNC_RAM(1)) sr_arith (
+        .clk(clk), .rst(rst),
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
+    soc #(.WORDS(WORDS), .HEXFILE("build/p_mem.hex"), .SYNC_RAM(1)) sr_mem (
+        .clk(clk), .rst(rst),
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
+    soc #(.WORDS(WORDS), .HEXFILE("build/p_branch.hex"), .SYNC_RAM(1)) sr_branch (
+        .clk(clk), .rst(rst),
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
+    soc #(.WORDS(WORDS), .HEXFILE("build/p_jump.hex"), .SYNC_RAM(1)) sr_jump (
+        .clk(clk), .rst(rst),
+        .char_valid(), .char_data(), .exit_valid(), .exit_code());
+    wire        sr_hello_cv, sr_hello_ev;
+    wire [7:0]  sr_hello_ch;
+    wire [31:0] sr_hello_code;
+    wire        sr_hello_tx;
+    soc #(.WORDS(WORDS), .HEXFILE("build/p_hello.hex"), .SYNC_RAM(1)) sr_hello (
+        .clk(clk), .rst(rst),
+        .char_valid(sr_hello_cv), .char_data(sr_hello_ch),
+        .exit_valid(sr_hello_ev), .exit_code(sr_hello_code), .serial_tx(sr_hello_tx));
+    uart_monitor #(.BAUD(SERIAL_BAUD)) m_sr_hello (.line(sr_hello_tx));
+    console_sink #(.ECHO(0)) s_sr_hello (.clk(clk), .rst(rst),
+        .char_valid(sr_hello_cv), .char_data(sr_hello_ch),
+        .exit_valid(sr_hello_ev), .exit_code(sr_hello_code));
+    wire        sr_cb_cv, sr_cb_ev;
+    wire [7:0]  sr_cb_ch;
+    wire [31:0] sr_cb_code;
+    wire        sr_cb_tx;
+    soc #(.WORDS(4096), .HEXFILE("build/c_basics.hex"), .SYNC_RAM(1),
+          .RAM_FILL(32'hDEAD_BEEF)) sr_cb (
+        .clk(clk), .rst(rst),
+        .char_valid(sr_cb_cv), .char_data(sr_cb_ch),
+        .exit_valid(sr_cb_ev), .exit_code(sr_cb_code), .serial_tx(sr_cb_tx));
+    uart_monitor #(.BAUD(SERIAL_BAUD)) m_sr_cb (.line(sr_cb_tx));
+    console_sink s_sr_cb (.clk(clk), .rst(rst),
+        .char_valid(sr_cb_cv), .char_data(sr_cb_ch),
+        .exit_valid(sr_cb_ev), .exit_code(sr_cb_code));
+
     // ---- bytes each serial line had delivered when its program exited ----
     integer c_hello_rx_at_exit = -1, l1_hello_rx_at_exit = -1, l3_hello_rx_at_exit = -1;
     integer c_cb_rx_at_exit    = -1, l1_cb_rx_at_exit    = -1, l3_cb_rx_at_exit    = -1;
+    integer sr_hello_rx_at_exit = -1, sr_cb_rx_at_exit = -1;
     always @(posedge clk) begin
         if (c_hello_ev)  c_hello_rx_at_exit  = m_c_hello.count;
         if (l1_hello_ev) l1_hello_rx_at_exit = m_l1_hello.count;
@@ -244,6 +286,8 @@ module soc_tb;
         if (c_cb_ev)     c_cb_rx_at_exit     = m_c_cb.count;
         if (l1_cb_ev)    l1_cb_rx_at_exit    = m_l1_cb.count;
         if (l3_cb_ev)    l3_cb_rx_at_exit    = m_l3_cb.count;
+        if (sr_hello_ev) sr_hello_rx_at_exit = m_sr_hello.count;
+        if (sr_cb_ev)    sr_cb_rx_at_exit    = m_sr_cb.count;
     end
 
     // ---- waveform probes for the c_mem walkthrough (tb/soc.gtkw) ----
@@ -260,9 +304,9 @@ module soc_tb;
     wire [31:0] c_mem_x8 = c_mem.u_cpu.u_rf.regs[8];
     wire [31:0] c_mem_x9 = c_mem.u_cpu.u_rf.regs[9];
     wire [31:0] c_mem_x10= c_mem.u_cpu.u_rf.regs[10];
-    wire [31:0] c_mem_m100 = c_mem.u_mem.mem[64];   // byte address 0x100
-    wire [31:0] c_mem_m104 = c_mem.u_mem.mem[65];   // byte address 0x104
-    wire [31:0] c_mem_m108 = c_mem.u_mem.mem[66];   // byte address 0x108
+    wire [31:0] c_mem_m100 = c_mem.g_mem.u_mem.mem[64];   // byte address 0x100
+    wire [31:0] c_mem_m104 = c_mem.g_mem.u_mem.mem[65];   // byte address 0x104
+    wire [31:0] c_mem_m108 = c_mem.g_mem.u_mem.mem[66];   // byte address 0x108
 
     // ---- retire log: `make trace PROG=p_mem [LAT=1|3]` ----
     // Off unless +trace=<name> is given; then only that SoC is logged.
@@ -360,6 +404,38 @@ module soc_tb;
         .daddr(l3_cb.u_cpu.d_addr), .dwdata(l3_cb.u_cpu.d_wdata), .wstrb(l3_cb.u_cpu.d_wstrb),
         .valid(l3_cb.u_cpu.d_valid), .ready(l3_cb.u_cpu.d_ready));
 
+    // clocked RAM: `make trace PROG=p_mem LAT=sync`
+    retire_log #(.NAME("p_arith@sync")) t_sr_arith (.clk(clk), .rst(rst),
+        .pc(sr_arith.u_cpu.i_addr), .instr(sr_arith.u_cpu.i_data),
+        .we(sr_arith.u_cpu.u_rf.we), .rd(sr_arith.u_cpu.u_rf.rd), .wd(sr_arith.u_cpu.u_rf.wd),
+        .daddr(sr_arith.u_cpu.d_addr), .dwdata(sr_arith.u_cpu.d_wdata), .wstrb(sr_arith.u_cpu.d_wstrb),
+        .valid(sr_arith.u_cpu.d_valid), .ready(sr_arith.u_cpu.d_ready));
+    retire_log #(.NAME("p_mem@sync")) t_sr_mem (.clk(clk), .rst(rst),
+        .pc(sr_mem.u_cpu.i_addr), .instr(sr_mem.u_cpu.i_data),
+        .we(sr_mem.u_cpu.u_rf.we), .rd(sr_mem.u_cpu.u_rf.rd), .wd(sr_mem.u_cpu.u_rf.wd),
+        .daddr(sr_mem.u_cpu.d_addr), .dwdata(sr_mem.u_cpu.d_wdata), .wstrb(sr_mem.u_cpu.d_wstrb),
+        .valid(sr_mem.u_cpu.d_valid), .ready(sr_mem.u_cpu.d_ready));
+    retire_log #(.NAME("p_branch@sync")) t_sr_branch (.clk(clk), .rst(rst),
+        .pc(sr_branch.u_cpu.i_addr), .instr(sr_branch.u_cpu.i_data),
+        .we(sr_branch.u_cpu.u_rf.we), .rd(sr_branch.u_cpu.u_rf.rd), .wd(sr_branch.u_cpu.u_rf.wd),
+        .daddr(sr_branch.u_cpu.d_addr), .dwdata(sr_branch.u_cpu.d_wdata), .wstrb(sr_branch.u_cpu.d_wstrb),
+        .valid(sr_branch.u_cpu.d_valid), .ready(sr_branch.u_cpu.d_ready));
+    retire_log #(.NAME("p_jump@sync")) t_sr_jump (.clk(clk), .rst(rst),
+        .pc(sr_jump.u_cpu.i_addr), .instr(sr_jump.u_cpu.i_data),
+        .we(sr_jump.u_cpu.u_rf.we), .rd(sr_jump.u_cpu.u_rf.rd), .wd(sr_jump.u_cpu.u_rf.wd),
+        .daddr(sr_jump.u_cpu.d_addr), .dwdata(sr_jump.u_cpu.d_wdata), .wstrb(sr_jump.u_cpu.d_wstrb),
+        .valid(sr_jump.u_cpu.d_valid), .ready(sr_jump.u_cpu.d_ready));
+    retire_log #(.NAME("p_hello@sync")) t_sr_hello (.clk(clk), .rst(rst),
+        .pc(sr_hello.u_cpu.i_addr), .instr(sr_hello.u_cpu.i_data),
+        .we(sr_hello.u_cpu.u_rf.we), .rd(sr_hello.u_cpu.u_rf.rd), .wd(sr_hello.u_cpu.u_rf.wd),
+        .daddr(sr_hello.u_cpu.d_addr), .dwdata(sr_hello.u_cpu.d_wdata), .wstrb(sr_hello.u_cpu.d_wstrb),
+        .valid(sr_hello.u_cpu.d_valid), .ready(sr_hello.u_cpu.d_ready));
+    retire_log #(.NAME("c_basics@sync")) t_sr_cb (.clk(clk), .rst(rst),
+        .pc(sr_cb.u_cpu.i_addr), .instr(sr_cb.u_cpu.i_data),
+        .we(sr_cb.u_cpu.u_rf.we), .rd(sr_cb.u_cpu.u_rf.rd), .wd(sr_cb.u_cpu.u_rf.wd),
+        .daddr(sr_cb.u_cpu.d_addr), .dwdata(sr_cb.u_cpu.d_wdata), .wstrb(sr_cb.u_cpu.d_wstrb),
+        .valid(sr_cb.u_cpu.d_valid), .ready(sr_cb.u_cpu.d_ready));
+
     // Every SoC has reached its final `jal x0, 0` (=== so X counts as not yet).
     wire all_done =
         (c_arith.u_cpu.i_data === 32'h0000006F) &&
@@ -379,7 +455,13 @@ module soc_tb;
         (l3_hello.u_cpu.i_data === 32'h0000006F) &&
         (c_cb.u_cpu.i_data === 32'h0000006F) &&
         (l1_cb.u_cpu.i_data === 32'h0000006F) &&
-        (l3_cb.u_cpu.i_data === 32'h0000006F);
+        (l3_cb.u_cpu.i_data === 32'h0000006F) &&
+        (sr_arith.u_cpu.i_data === 32'h0000006F) &&
+        (sr_mem.u_cpu.i_data === 32'h0000006F) &&
+        (sr_branch.u_cpu.i_data === 32'h0000006F) &&
+        (sr_jump.u_cpu.i_data === 32'h0000006F) &&
+        (sr_hello.u_cpu.i_data === 32'h0000006F) &&
+        (sr_cb.u_cpu.i_data === 32'h0000006F);
 
     initial clk = 0;
     always #5 clk = ~clk;
@@ -460,6 +542,15 @@ module soc_tb;
         `CHECK_SERIAL(m_l3_hello, s_l3_hello, l3_hello_rx_at_exit, "L3 ", "hello")
         `CHECK_C(l3_cb, s_l3_cb, "L3 ", "c_basics")
         `CHECK_SERIAL(m_l3_cb, s_l3_cb, l3_cb_rx_at_exit, "L3 ", "c_basics")
+        $display("--- clocked RAM (ram_sync) -----------------------------------");
+        `CHECK_ARITH(sr_arith, "SR ")
+        `CHECK_MEM(sr_mem, "SR ")
+        `CHECK_BRANCH(sr_branch, "SR ")
+        `CHECK_JUMP(sr_jump, "SR ")
+        `CHECK_HELLO(sr_hello, s_sr_hello, "SR ")
+        `CHECK_SERIAL(m_sr_hello, s_sr_hello, sr_hello_rx_at_exit, "SR ", "hello")
+        `CHECK_C(sr_cb, s_sr_cb, "SR ", "c_basics")
+        `CHECK_SERIAL(m_sr_cb, s_sr_cb, sr_cb_rx_at_exit, "SR ", "c_basics")
 
         $display("--------------------------------------------------");
         if (errors == 0) $display("SOC: ALL TESTS PASSED (%0d checks)", checks);

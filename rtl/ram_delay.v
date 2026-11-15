@@ -21,11 +21,17 @@
 // Back-to-back requests: d_valid can stay high across two consecutive memory
 // instructions, so "valid is high" does not mean "same request". The counter
 // therefore restarts after every completed request, not only when valid drops.
+//
+// MIN_READ: the least a load must wait, whatever LATENCY says. 0 for memory.v
+// (it reads in the same cycle); 1 for ram_sync.v, which samples the address on
+// the edge and has the word only in the next cycle. Stores wait LATENCY only:
+// any RAM writes on the edge that ends the cycle they are presented in.
 
 `timescale 1ns/1ps
 
 module ram_delay #(
-    parameter LATENCY = 0                 // extra cycles per request, 0..255
+    parameter LATENCY  = 0,               // extra cycles per request, 0..255
+    parameter MIN_READ = 0                // least wait for a load (1 = clocked RAM)
 ) (
     input  wire        clk,
     input  wire        rst,
@@ -51,7 +57,12 @@ module ram_delay #(
             waited <= waited + 8'd1;
     end
 
-    assign ready     = valid && (waited == LATENCY);
+    // [7:0] on the parameters: they are 32-bit integers, and this says the cut
+    // to 8 bits is meant (Quartus warns otherwise)
+    localparam [7:0] READ_WAIT = (LATENCY > MIN_READ) ? LATENCY[7:0] : MIN_READ[7:0];
+    wire [7:0] need = (wstrb == 4'b0000) ? READ_WAIT : LATENCY[7:0];
+
+    assign ready     = valid && (waited == need);
     assign mem_wstrb = ready ? wstrb     : 4'b0000;        // write once, on completion
     assign rdata     = ready ? mem_rdata : 32'hDEAD_DEAD;  // nothing to see until then
 

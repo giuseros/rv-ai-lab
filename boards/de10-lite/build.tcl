@@ -24,6 +24,12 @@ set_global_assignment -name TOP_LEVEL_ENTITY $module
 set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
 set_global_assignment -name NUM_PARALLEL_PROCESSORS ALL
 
+# RAM with initial contents (the program in ram_sync): the MAX 10 supports it
+# only in a configuration mode "with memory initialization" (ERAM). In the
+# default mode Quartus refuses such RAM ("MIF is not supported for the selected
+# family") or drops its contents, leaving the CPU to start from an empty memory.
+set_global_assignment -name INTERNAL_FLASH_UPDATE_MODE "SINGLE IMAGE WITH ERAM"
+
 # Sources: all of rtl/ (only what the top instantiates gets built; the rest is
 # just parsed) plus the board's top. Quartus has no Verilog-2005 mode (only 1995,
 # 2001 and SystemVerilog): 2001 is the closest, and iverilog -g2005 stays the

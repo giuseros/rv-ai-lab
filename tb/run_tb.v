@@ -4,6 +4,7 @@
 //     make run PROG=count            # console output + summary
 //     make run PROG=count LAT=3      # memory and console answer 3 cycles late
 //     make run PROG=count TRACE=1    # also print the retire log
+//     make run PROG=count SYNC=1     # on the clocked RAM (ram_sync), as on an FPGA
 //
 // Unlike soc_tb this checks nothing: it is for running programs, not testing
 // the core. The program is chosen when the simulation is built (make passes
@@ -19,6 +20,7 @@ module run_tb;
 
     parameter HEXFILE = "";            // set by make
     parameter LAT     = 0;             // RAM and console latency
+    parameter SYNC    = 0;             // 1 = clocked RAM (ram_sync), as on an FPGA
     parameter ECHO    = 1;             // print the console output as it happens
     // RAM outside the program image starts as garbage, like real RAM: a program
     // that reads memory it never wrote (an uncleared .bss, say) shows it.
@@ -34,7 +36,7 @@ module run_tb;
     wire [31:0] exit_code;
 
     soc #(.WORDS(WORDS), .HEXFILE(HEXFILE), .RAM_LATENCY(LAT), .IO_LATENCY(LAT),
-          .RAM_FILL(FILL)) dut (
+          .RAM_FILL(FILL), .SYNC_RAM(SYNC)) dut (
         .clk(clk), .rst(rst),
         .char_valid(char_valid), .char_data(char_data),
         .exit_valid(exit_valid), .exit_code(exit_code));

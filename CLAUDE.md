@@ -54,11 +54,13 @@ make sim  MOD=<mod>        # compile rtl/<mod>.v + tb/tb_lib.v + tb/<mod>_tb.v, 
                            #   (plus the submodules listed in the Makefile's DEPS_<mod>)
 make wave MOD=<mod>        # same, then open build/<mod>.vcd in gtkwave
 make run   PROG=<prog>     # run sw/<prog>.c|.S (or tb/): console output, exit code, CPI
-                           #   LAT=1|3 for slow memory, TRACE=1 for the retire log
+                           #   LAT=1|3 for slow memory, SYNC=1 for the clocked RAM (as on
+                           #   an FPGA), TRACE=1 for the retire log
 make build/<prog>.hex      # assemble sw/ or tb/<prog>.S into a $readmemh image
 make dis   PROG=<prog>     # disassemble a test program
 make trace PROG=<prog>     # retire log: one line per executed instruction + its effect
-                           #   ends with instructions, cycles and CPI; LAT=1|3 for slow RAM
+                           #   ends with instructions, cycles and CPI; LAT=1|3 for slow RAM,
+                           #   LAT=sync for the clocked RAM
 make fpga-sim BOARD=<b> TOP=<t>   # simulate boards/<b>/<t>_top.v with its testbench
 make fpga     BOARD=<b> TOP=<t>   # Quartus: synthesise, fit, assemble, time; report LEs/Fmax
 make program  BOARD=<b> TOP=<t>   # load the .sof over JTAG (volatile: gone at power-off)
@@ -66,7 +68,8 @@ make clean
 ```
 `MOD=soc` compiles all of `rtl/*.v`. The `.S -> .hex` rule is `as -march=rv32i
 -mabi=ilp32` -> `ld -m elf32lriscv -Ttext=0` -> `objcopy -O binary` -> `od -An -tx4 -v -w4`
-(one little-endian 32-bit word per line). C: `gcc -march=rv32i -mabi=ilp32 -O2
+(one little-endian 32-bit word per line), plus `<prog>.hex.b0`..`.b3` (byte i of each
+word, one per line) for `ram_sync`'s byte lanes. C: `gcc -march=rv32i -mabi=ilp32 -O2
 -ffreestanding -nostdlib -nostartfiles -T sw/rt/link.ld crt0.S runtime.c prog.c -lgcc`
 (libgcc supplies mul/div; there is no libc, `soc.h` is the whole library: `printf` and
 `snprintf` (`%d %i %u %x %X %c %s %p %%`, `-`/`0` flags, width, `ll`; no `%f`, no
@@ -110,18 +113,29 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
   port; a pipelined core must export its own retire signals.
 - Stimulus changes on the opposite clock edge from the one the DUT samples (e.g. reset
   is released on a negedge).
-- `soc_tb` runs every `tb/p_*.S` at memory latency 0, 1 and 3 (15 SoCs; per-program
-  checks are `` `define `` macros taking the instance name), runs until every SoC reaches
-  its final `jal x0, 0` (timeout otherwise), and checks state through
-  hierarchical references, so instance names are a contract: **`soc.v` names `u_cpu`
-  and `u_mem`; `cpu.v` names `u_rf`**. Never check `u_rf.regs[0]`: x0 is a read-mux
-  constant, the array slot is X.
+- `soc_tb` runs every `tb/p_*.S` and `tb/c_*.c` at memory latency 0, 1 and 3 and on the
+  clocked RAM (24 SoCs; per-program checks are `` `define `` macros taking the instance
+  name), runs until every SoC reaches its final `jal x0, 0` (timeout otherwise), and
+  checks state through hierarchical references, so instance names are a contract:
+  **`soc.v` names `u_cpu` and `g_mem.u_mem`, and `g_mem.word(n)` reads RAM word n
+  whichever RAM it is; `cpu.v` names `u_rf`**. Never check `u_rf.regs[0]`: x0 is a
+  read-mux constant, the array slot is X. The retire log must be identical on every RAM
+  (`make trace PROG=c_basics` vs `LAT=sync`); only the cycle count may differ.
 
 ## Design decisions worth knowing
 - **Memory** is one unified array (GCC emits one address space) with two async read
   ports and one sync write port with byte strobes (`wstrb`, no separate write enable).
   Byte addresses; `addr[1:0]` ignored by memory. Sub-word load extraction and store
   alignment live in `cpu.v`, keeping memory ISA-agnostic.
+- **Two RAMs, chosen by `soc`'s `SYNC_RAM`.** `memory.v` (async read) is the ideal
+  memory, sim only. `ram_sync.v` reads on the clock edge, as FPGA block RAM does: fetch
+  samples the CPU's `i_next` (the value the PC takes on this edge: 0 in reset, PC while
+  stalled, else next_pc), loads wait one cycle (`ram_delay`'s `MIN_READ`), stores don't.
+  It is four byte-wide `ram_lane`s, one write enable each: Quartus (Verilog-2005) builds
+  block RAM from a 32-bit array with per-byte writes but then DROPS its initial contents,
+  and a fill loop next to per-byte writes is not recognised as RAM at all (it then tries
+  131k flip-flops and seems to hang). Lanes also suit RAM without byte enables (DVK600).
+  Same edge, same word: reads see the old data (RISC-V needs FENCE.I for that anyway).
 - **The ALU computes every address** (branch/jump targets, load/store addresses,
   lui/auipc), so `alu_a_src`/`alu_b_src`/`alu_op` are defined for every instruction.
   Branch comparison is a separate comparator in `cpu.v` driven by funct3.
@@ -176,11 +190,13 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     `soc.serial_tx`, and completes when the transmitter takes the byte (`d_ready` stall
     only if the line is still busy); exit completes only once the line is idle. The baud
     rate is a `soc` parameter, default a sim speed (4 cycles/bit at 10 ns, which makes
-    printing C programs' CPI > 1); `console_tb` unit test; `soc_tb` decodes the line. Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
+    printing C programs' CPI > 1); `console_tb` unit test; `soc_tb` decodes the line.
+    **Clocked RAM: done in sim** (`ram_sync`, see Design decisions); every program passes
+    on it with an identical retire log. Quartus synthesis of `soc` with `SYNC_RAM=1`:
+    3,769 LEs, 1,094 registers (1,024 are the register file), 4 initialised M9K RAMs.
+    Next: `boards/de10-lite/soc_top.v`. Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
     iverilog `-g2005` stays the strict language check.
-  - Memory must read on the clock edge (block RAM). Loads: one extra cycle through the
-    existing `d_ready` stall. Fetch: present the *next* PC to the RAM one edge early, so
-    the instruction for the current PC is ready at the start of the cycle.
+  - Memory must read on the clock edge (block RAM): done, `ram_sync` (above).
   - DE10-Lite output: 7-segment + LEDs first; then `printf` through **our own UART**
     (`rtl/uart_tx.v` inside the console: done in sim) to a PL2303 USB-serial board set to 3.3 V
     on the GPIO header (GND, TXD, RXD only; never its VCCIO). The board's only USB port is
@@ -193,6 +209,10 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     `jtagconfig` hangs after a replug, a stale `jtagd` holds the old USB handle (kill it).
     Reading the serial port: `stty ... raw clocal` (without `clocal` a read can wait for
     carrier forever); a shell older than the `dialout` membership needs `sg dialout -c`.
+    RAM with initial contents needs `INTERNAL_FLASH_UPDATE_MODE "SINGLE IMAGE WITH ERAM"`
+    (in `build.tcl`): in the default mode the MAX 10 can't initialise RAM. Check a RAM
+    with a synthesis-only run first (minutes) and read the map report's RAM Summary
+    (Mode, MIF column) before a full build.
 - **Then, open-ended:** CSRs and exceptions (today an illegal instruction, misaligned
   access or null-pointer write fails silently), which also gives performance counters
   (`rdcycle`/`rdinstret`) to measure everything after; a pipelined core (hazards,

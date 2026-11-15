@@ -24,8 +24,17 @@
 // character out of serial_tx, for a board's UART pin, and makes the CPU wait
 // (d_ready) while the line is busy.
 //
-// tb/soc_tb.v reaches into this hierarchy, so the instance names u_cpu and
-// u_mem are part of its contract.
+// The RAM is one of two, chosen by SYNC_RAM:
+//   0  memory.v:   reads in the same cycle (an ideal memory; simulation only,
+//                  it cannot be built from FPGA block RAM)
+//   1  ram_sync.v: reads on the clock edge, as FPGA block RAM does. Fetch then
+//                  uses the CPU's i_next (next cycle's PC), and loads wait one
+//                  cycle for their data (ram_delay's MIN_READ).
+// Either way the instance is g_mem.u_mem, and g_mem.word(n) returns word n
+// (simulation only), so testbenches read memory the same way for both.
+//
+// tb/soc_tb.v reaches into this hierarchy, so the names u_cpu, g_mem.u_mem and
+// g_mem.word are part of its contract.
 
 `timescale 1ns/1ps
 
@@ -35,6 +44,7 @@ module soc #(
     parameter RAM_LATENCY = 0,     // extra cycles per RAM access (0 = instant)
     parameter IO_LATENCY  = 0,     // extra cycles per console access
     parameter [31:0] RAM_FILL = 32'd0, // RAM contents outside the program image
+    parameter SYNC_RAM    = 0,     // 1 = RAM reads on the clock edge (block RAM)
     // Serial line. The default is a simulation speed: the testbenches' 10 ns
     // clock and 4 cycles a bit, so printing stays cheap. A board passes its own.
     parameter CLK_HZ      = 100_000_000,
@@ -54,7 +64,7 @@ module soc #(
 );
 
     // fetch port
-    wire [31:0] i_addr, i_data;
+    wire [31:0] i_addr, i_data, i_next;
 
     // data port
     wire        d_valid;
@@ -89,6 +99,7 @@ module soc #(
         .rst     (rst),
         .i_addr  (i_addr),
         .i_data  (i_data),
+        .i_next  (i_next),
         .d_valid (d_valid),
         .d_addr  (d_addr),
         .d_wstrb (d_wstrb),
@@ -107,7 +118,7 @@ module soc #(
     );
 
     // Turns the instant RAM into a target that answers after RAM_LATENCY cycles.
-    ram_delay #(.LATENCY(RAM_LATENCY)) u_delay (
+    ram_delay #(.LATENCY(RAM_LATENCY), .MIN_READ(SYNC_RAM ? 1 : 0)) u_delay (
         .clk       (clk),
         .rst       (rst),
         .valid     (ram_valid),
@@ -118,18 +129,41 @@ module soc #(
         .mem_rdata (mem_rdata)
     );
 
-    // The RAM itself is passive and answers combinationally: it writes only the
-    // lanes whose strobe is set (ram_delay sets them on the completing cycle
-    // only), and an unrequested read is harmless.
-    memory #(.WORDS(WORDS), .HEXFILE(HEXFILE), .FILL(RAM_FILL)) u_mem (
-        .clk    (clk),
-        .iaddr  (i_addr),
-        .idata  (i_data),
-        .daddr  (ram_addr),
-        .drdata (mem_rdata),
-        .dwdata (ram_wdata),
-        .wstrb  (mem_wstrb)
-    );
+    // The RAM itself is passive: it writes only the lanes whose strobe is set
+    // (ram_delay sets them on the completing cycle only), and a read nobody
+    // asked for is harmless.
+    generate if (SYNC_RAM) begin : g_mem
+        ram_sync #(.WORDS(WORDS), .HEXFILE(HEXFILE), .FILL(RAM_FILL)) u_mem (
+            .clk    (clk),
+            .iaddr  (i_next),       // sampled on the edge: the next cycle's PC
+            .idata  (i_data),
+            .daddr  (ram_addr),
+            .drdata (mem_rdata),
+            .dwdata (ram_wdata),
+            .wstrb  (mem_wstrb)
+        );
+        // synthesis translate_off
+        function [31:0] word(input integer n);
+            word = {u_mem.lane[3].u_lane.m[n], u_mem.lane[2].u_lane.m[n],
+                    u_mem.lane[1].u_lane.m[n], u_mem.lane[0].u_lane.m[n]};
+        endfunction
+        // synthesis translate_on
+    end else begin : g_mem
+        memory #(.WORDS(WORDS), .HEXFILE(HEXFILE), .FILL(RAM_FILL)) u_mem (
+            .clk    (clk),
+            .iaddr  (i_addr),
+            .idata  (i_data),
+            .daddr  (ram_addr),
+            .drdata (mem_rdata),
+            .dwdata (ram_wdata),
+            .wstrb  (mem_wstrb)
+        );
+        // synthesis translate_off
+        function [31:0] word(input integer n);
+            word = u_mem.mem[n];
+        endfunction
+        // synthesis translate_on
+    end endgenerate
 
     console #(.LATENCY(IO_LATENCY), .CLK_HZ(CLK_HZ), .BAUD(BAUD)) u_console (
         .clk        (clk),

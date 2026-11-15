@@ -23,7 +23,8 @@ IVFLAGS := -g2005 -Wall -I rtl
 # testbench may use tb/tb_lib.v; -s picks <MOD>_tb as the one top module, so the
 # library's (and rtl/'s) other modules are just parsed, never run.
 # A module built from other modules lists them in DEPS_<MOD>.
-DEPS_console := rtl/uart_tx.v
+DEPS_console  := rtl/uart_tx.v
+DEPS_ram_sync := rtl/ram_lane.v
 ifeq ($(MOD),soc)
 SRCS := $(wildcard rtl/*.v) tb/tb_lib.v tb/$(MOD)_tb.v
 else
@@ -40,12 +41,20 @@ ASFLAGS := -march=rv32i -mabi=ilp32
 PROG_HEX := $(patsubst tb/%.S,$(BUILD)/%.hex,$(wildcard tb/p_*.S)) \
             $(patsubst tb/%.c,$(BUILD)/%.hex,$(wildcard tb/c_*.c))
 
+# Every .hex also gets its byte lanes, <name>.hex.b0 .. .b3: one byte per line,
+# byte i of each word, for ram_sync's four byte-wide RAMs. A line of the .hex is
+# 8 hex digits, most significant first, so byte i is the 2 digits at 7 - 2i.
+define HEX_LANES
+	for b in 0 1 2 3; do awk -v b=$$b '{print substr($$1, 7 - 2*b, 2)}' $@ > $@.b$$b; done
+endef
+
 # Assembly programs live in sw/ (programs you run) or tb/ (regression tests).
 define ASM_TO_HEX
 	$(RISCV)-as $(ASFLAGS) -o $(BUILD)/$*.o $<
 	$(RISCV)-ld -m elf32lriscv -Ttext=0 -o $(BUILD)/$*.elf $(BUILD)/$*.o
 	$(RISCV)-objcopy -O binary $(BUILD)/$*.elf $(BUILD)/$*.bin
 	od -An -tx4 -v -w4 $(BUILD)/$*.bin | awk '{print $$1}' > $@
+	$(HEX_LANES)
 endef
 $(BUILD)/%.hex: sw/%.S | $(BUILD)
 	$(ASM_TO_HEX)
@@ -65,6 +74,7 @@ define C_TO_HEX
 	$(RISCV)-gcc $(CFLAGS) -T sw/rt/link.ld $(LDFLAGS) -o $(BUILD)/$*.elf $(RT) $< -lgcc
 	$(RISCV)-objcopy -O binary $(BUILD)/$*.elf $(BUILD)/$*.bin
 	od -An -tx4 -v -w4 $(BUILD)/$*.bin | awk '{print $$1}' > $@
+	$(HEX_LANES)
 endef
 $(BUILD)/%.hex: sw/%.c $(RT) sw/rt/soc.h sw/rt/link.ld | $(BUILD)
 	$(C_TO_HEX)
@@ -89,12 +99,13 @@ trace:
 	@vvp $(BUILD)/soc.vvp +trace=$(PROG)$(if $(filter-out 0,$(LAT)),@$(LAT)) | python3 tb/annotate.py $(BUILD)/$(PROG).elf
 
 # Run one program (sw/<PROG>.c, sw/<PROG>.S or tb/<PROG>.S) on a single SoC.
-#   make run PROG=count [LAT=3] [TRACE=1]
+#   make run PROG=count [LAT=3] [TRACE=1] [SYNC=1]   (SYNC=1: clocked RAM, ram_sync)
 RUN_SRCS := $(wildcard rtl/*.v) tb/tb_lib.v tb/run_tb.v
 run: $(BUILD)/$(PROG).hex
 	@iverilog $(IVFLAGS) -o $(BUILD)/run.vvp \
 	    -Prun_tb.HEXFILE='"$(BUILD)/$(PROG).hex"' \
 	    -Prun_tb.LAT=$(or $(LAT),0) \
+	    -Prun_tb.SYNC=$(or $(SYNC),0) \
 	    -Prun_tb.ECHO=$(if $(TRACE),0,1) \
 	    $(RUN_SRCS)
 	@vvp -n $(BUILD)/run.vvp $(if $(TRACE),+trace=run) \
@@ -152,6 +163,6 @@ $(BUILD):
 	@mkdir -p $(BUILD)
 
 clean:
-	@rm -rf $(BUILD)/*.vvp $(BUILD)/*.vcd $(BUILD)/*.o $(BUILD)/*.elf $(BUILD)/*.bin $(BUILD)/*.hex
+	@rm -rf $(BUILD)/*.vvp $(BUILD)/*.vcd $(BUILD)/*.o $(BUILD)/*.elf $(BUILD)/*.bin $(BUILD)/*.hex $(BUILD)/*.hex.b?
 	@rm -rf $(BUILD)/*/
 	@echo "cleaned"

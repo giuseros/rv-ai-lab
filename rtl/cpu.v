@@ -8,6 +8,11 @@
 //
 //   Fetch port   i_addr -> instruction address (the PC)
 //                i_data <- the instruction word at that address (same cycle)
+//                i_next -> the PC of the NEXT cycle: what the PC register takes
+//                          on this edge (0 in reset, the same PC while stalled).
+//                          A memory that reads on the clock edge (ram_sync)
+//                          samples this instead of i_addr, so the instruction
+//                          for the new PC is ready as the new cycle starts.
 //
 //   Data port    d_valid -> there is a load or store this cycle
 //   (the bus)    d_addr  -> byte address (the ALU result)
@@ -39,6 +44,7 @@ module cpu (
     // fetch port
     output wire [31:0] i_addr,
     input  wire [31:0] i_data,
+    output wire [31:0] i_next,
 
     // data port (to the bus)
     output wire        d_valid,
@@ -62,6 +68,9 @@ module cpu (
             PC <= next_pc;
         end
     end
+
+    // The same choice as above, as a value: what PC becomes on this edge.
+    assign i_next = rst ? 32'd0 : stall ? PC : next_pc;
 
     wire [1:0] alu_a_src, result_src, mem_size;
     wire [31:0] a, b, y, instr;
