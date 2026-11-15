@@ -124,7 +124,9 @@ endmodule
 // Records: bytes[] in order, count, the start-to-start time of each byte
 // (period[]; for back-to-back bytes it should be 10 bit periods), framing
 // errors (stop bit not 1) and false starts (line low for less than half a bit:
-// a glitch). With ECHO it also writes the characters to the simulator output.
+// a glitch). `text` holds the last 64 bytes exactly as console_sink's does
+// (newest in the low byte), so the two can be compared directly. With ECHO it
+// also writes the characters to the simulator output.
 // ===========================================================================
 module uart_monitor #(parameter BAUD = 115_200, parameter ECHO = 0) (
     input wire line
@@ -135,10 +137,11 @@ module uart_monitor #(parameter BAUD = 115_200, parameter ECHO = 0) (
     integer count, framing_errors, false_starts, k;
     real    t_start, t_prev;
     reg [7:0] b;
+    reg [8*64:1] text;
 
     initial begin
         bit_ns = 1.0e9 / BAUD;
-        count = 0; framing_errors = 0; false_starts = 0; t_prev = -1.0;
+        count = 0; framing_errors = 0; false_starts = 0; t_prev = -1.0; text = 0;
     end
 
     always begin
@@ -159,6 +162,7 @@ module uart_monitor #(parameter BAUD = 115_200, parameter ECHO = 0) (
             period[count & 255] = (t_prev < 0.0) ? 0.0 : t_start - t_prev;
             t_prev = t_start;
             count  = count + 1;
+            text   = {text[8*63:1], b};
             if (ECHO) $write("%c", b);
         end
     end

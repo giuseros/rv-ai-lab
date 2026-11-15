@@ -85,6 +85,19 @@
     chk(C.u_mem.mem[0], 32'h100002B7,  {T, "hello console stores left RAM alone"}); \
     chk(C.u_mem.mem[1], 32'h02800313,  {T, "hello exit store left RAM alone"});
 
+// The console also sends every character out of the SoC's serial line, and the
+// CPU waits for the line when it prints faster than the line sends. A
+// uart_monitor M decodes the line; it must carry exactly what the events printed
+// (S). The program's exit waits for the line to go idle, so the last character
+// has been received by the time of the exit event: A is the monitor's count
+// then. (Checking only at the end would not show it: the end is when the
+// slowest SoC finishes, long after every other line has gone quiet.)
+`define CHECK_SERIAL(M, S, A, T, NAME) \
+    chk(M.count, S.count,  {T, NAME, " serial: bytes = chars printed"}); \
+    chk(A,       S.count,  {T, NAME, " serial: all received at exit"}); \
+    chk_text(M.text, S.text, {T, NAME, " serial: same text as events"}); \
+    chk(M.framing_errors + M.false_starts, 32'd0, {T, NAME, " serial: no framing errors"});
+
 // Compiled C: the program checks its own results and exits with its number of
 // failures, so exit code 0 is the test. It ends in crt0's final `j .`.
 `define CHECK_C(C, S, T, NAME) \
@@ -96,6 +109,7 @@ module soc_tb;
 
     localparam WORDS  = 256;     // 1 KiB, enough for these programs
     localparam MAX_CYCLES = 200000;  // timeout: a hung CPU fails instead of waiting forever
+    localparam SERIAL_BAUD = 25_000_000;  // soc.v's default line: 4 cycles a bit at 10 ns
 
     reg clk, rst;
     integer errors = 0;
@@ -145,30 +159,36 @@ module soc_tb;
     wire        c_hello_cv, c_hello_ev;
     wire [7:0]  c_hello_ch;
     wire [31:0] c_hello_code;
+    wire        c_hello_tx;
     soc #(.WORDS(WORDS), .HEXFILE("build/p_hello.hex"), .RAM_LATENCY(0), .IO_LATENCY(0)) c_hello (
         .clk(clk), .rst(rst),
         .char_valid(c_hello_cv), .char_data(c_hello_ch),
-        .exit_valid(c_hello_ev), .exit_code(c_hello_code));
+        .exit_valid(c_hello_ev), .exit_code(c_hello_code), .serial_tx(c_hello_tx));
+    uart_monitor #(.BAUD(SERIAL_BAUD)) m_c_hello (.line(c_hello_tx));
     console_sink #(.ECHO(1)) s_c_hello (.clk(clk), .rst(rst),
         .char_valid(c_hello_cv), .char_data(c_hello_ch),
         .exit_valid(c_hello_ev), .exit_code(c_hello_code));
     wire        l1_hello_cv, l1_hello_ev;
     wire [7:0]  l1_hello_ch;
     wire [31:0] l1_hello_code;
+    wire        l1_hello_tx;
     soc #(.WORDS(WORDS), .HEXFILE("build/p_hello.hex"), .RAM_LATENCY(1), .IO_LATENCY(1)) l1_hello (
         .clk(clk), .rst(rst),
         .char_valid(l1_hello_cv), .char_data(l1_hello_ch),
-        .exit_valid(l1_hello_ev), .exit_code(l1_hello_code));
+        .exit_valid(l1_hello_ev), .exit_code(l1_hello_code), .serial_tx(l1_hello_tx));
+    uart_monitor #(.BAUD(SERIAL_BAUD)) m_l1_hello (.line(l1_hello_tx));
     console_sink #(.ECHO(0)) s_l1_hello (.clk(clk), .rst(rst),
         .char_valid(l1_hello_cv), .char_data(l1_hello_ch),
         .exit_valid(l1_hello_ev), .exit_code(l1_hello_code));
     wire        l3_hello_cv, l3_hello_ev;
     wire [7:0]  l3_hello_ch;
     wire [31:0] l3_hello_code;
+    wire        l3_hello_tx;
     soc #(.WORDS(WORDS), .HEXFILE("build/p_hello.hex"), .RAM_LATENCY(3), .IO_LATENCY(3)) l3_hello (
         .clk(clk), .rst(rst),
         .char_valid(l3_hello_cv), .char_data(l3_hello_ch),
-        .exit_valid(l3_hello_ev), .exit_code(l3_hello_code));
+        .exit_valid(l3_hello_ev), .exit_code(l3_hello_code), .serial_tx(l3_hello_tx));
+    uart_monitor #(.BAUD(SERIAL_BAUD)) m_l3_hello (.line(l3_hello_tx));
     console_sink #(.ECHO(0)) s_l3_hello (.clk(clk), .rst(rst),
         .char_valid(l3_hello_cv), .char_data(l3_hello_ch),
         .exit_valid(l3_hello_ev), .exit_code(l3_hello_code));
@@ -177,36 +197,54 @@ module soc_tb;
     wire        c_cb_cv, c_cb_ev;
     wire [7:0]  c_cb_ch;
     wire [31:0] c_cb_code;
+    wire        c_cb_tx;
     soc #(.WORDS(4096), .HEXFILE("build/c_basics.hex"), .RAM_LATENCY(0), .IO_LATENCY(0),
           .RAM_FILL(32'hDEAD_BEEF)) c_cb (
         .clk(clk), .rst(rst),
         .char_valid(c_cb_cv), .char_data(c_cb_ch),
-        .exit_valid(c_cb_ev), .exit_code(c_cb_code));
+        .exit_valid(c_cb_ev), .exit_code(c_cb_code), .serial_tx(c_cb_tx));
+    uart_monitor #(.BAUD(SERIAL_BAUD)) m_c_cb (.line(c_cb_tx));
     console_sink s_c_cb (.clk(clk), .rst(rst),
         .char_valid(c_cb_cv), .char_data(c_cb_ch),
         .exit_valid(c_cb_ev), .exit_code(c_cb_code));
     wire        l1_cb_cv, l1_cb_ev;
     wire [7:0]  l1_cb_ch;
     wire [31:0] l1_cb_code;
+    wire        l1_cb_tx;
     soc #(.WORDS(4096), .HEXFILE("build/c_basics.hex"), .RAM_LATENCY(1), .IO_LATENCY(1),
           .RAM_FILL(32'hDEAD_BEEF)) l1_cb (
         .clk(clk), .rst(rst),
         .char_valid(l1_cb_cv), .char_data(l1_cb_ch),
-        .exit_valid(l1_cb_ev), .exit_code(l1_cb_code));
+        .exit_valid(l1_cb_ev), .exit_code(l1_cb_code), .serial_tx(l1_cb_tx));
+    uart_monitor #(.BAUD(SERIAL_BAUD)) m_l1_cb (.line(l1_cb_tx));
     console_sink s_l1_cb (.clk(clk), .rst(rst),
         .char_valid(l1_cb_cv), .char_data(l1_cb_ch),
         .exit_valid(l1_cb_ev), .exit_code(l1_cb_code));
     wire        l3_cb_cv, l3_cb_ev;
     wire [7:0]  l3_cb_ch;
     wire [31:0] l3_cb_code;
+    wire        l3_cb_tx;
     soc #(.WORDS(4096), .HEXFILE("build/c_basics.hex"), .RAM_LATENCY(3), .IO_LATENCY(3),
           .RAM_FILL(32'hDEAD_BEEF)) l3_cb (
         .clk(clk), .rst(rst),
         .char_valid(l3_cb_cv), .char_data(l3_cb_ch),
-        .exit_valid(l3_cb_ev), .exit_code(l3_cb_code));
+        .exit_valid(l3_cb_ev), .exit_code(l3_cb_code), .serial_tx(l3_cb_tx));
+    uart_monitor #(.BAUD(SERIAL_BAUD)) m_l3_cb (.line(l3_cb_tx));
     console_sink s_l3_cb (.clk(clk), .rst(rst),
         .char_valid(l3_cb_cv), .char_data(l3_cb_ch),
         .exit_valid(l3_cb_ev), .exit_code(l3_cb_code));
+
+    // ---- bytes each serial line had delivered when its program exited ----
+    integer c_hello_rx_at_exit = -1, l1_hello_rx_at_exit = -1, l3_hello_rx_at_exit = -1;
+    integer c_cb_rx_at_exit    = -1, l1_cb_rx_at_exit    = -1, l3_cb_rx_at_exit    = -1;
+    always @(posedge clk) begin
+        if (c_hello_ev)  c_hello_rx_at_exit  = m_c_hello.count;
+        if (l1_hello_ev) l1_hello_rx_at_exit = m_l1_hello.count;
+        if (l3_hello_ev) l3_hello_rx_at_exit = m_l3_hello.count;
+        if (c_cb_ev)     c_cb_rx_at_exit     = m_c_cb.count;
+        if (l1_cb_ev)    l1_cb_rx_at_exit    = m_l1_cb.count;
+        if (l3_cb_ev)    l3_cb_rx_at_exit    = m_l3_cb.count;
+    end
 
     // ---- waveform probes for the c_mem walkthrough (tb/soc.gtkw) ----
     // $dumpvars skips arrays, so the register file and memory never show up in
@@ -401,21 +439,27 @@ module soc_tb;
         `CHECK_BRANCH(c_branch, "L0 ")
         `CHECK_JUMP(c_jump, "L0 ")
         `CHECK_HELLO(c_hello, s_c_hello, "L0 ")
+        `CHECK_SERIAL(m_c_hello, s_c_hello, c_hello_rx_at_exit, "L0 ", "hello")
         `CHECK_C(c_cb, s_c_cb, "L0 ", "c_basics")
+        `CHECK_SERIAL(m_c_cb, s_c_cb, c_cb_rx_at_exit, "L0 ", "c_basics")
         $display("--- RAM latency 1 -------------------------------------------");
         `CHECK_ARITH(l1_arith, "L1 ")
         `CHECK_MEM(l1_mem, "L1 ")
         `CHECK_BRANCH(l1_branch, "L1 ")
         `CHECK_JUMP(l1_jump, "L1 ")
         `CHECK_HELLO(l1_hello, s_l1_hello, "L1 ")
+        `CHECK_SERIAL(m_l1_hello, s_l1_hello, l1_hello_rx_at_exit, "L1 ", "hello")
         `CHECK_C(l1_cb, s_l1_cb, "L1 ", "c_basics")
+        `CHECK_SERIAL(m_l1_cb, s_l1_cb, l1_cb_rx_at_exit, "L1 ", "c_basics")
         $display("--- RAM latency 3 -------------------------------------------");
         `CHECK_ARITH(l3_arith, "L3 ")
         `CHECK_MEM(l3_mem, "L3 ")
         `CHECK_BRANCH(l3_branch, "L3 ")
         `CHECK_JUMP(l3_jump, "L3 ")
         `CHECK_HELLO(l3_hello, s_l3_hello, "L3 ")
+        `CHECK_SERIAL(m_l3_hello, s_l3_hello, l3_hello_rx_at_exit, "L3 ", "hello")
         `CHECK_C(l3_cb, s_l3_cb, "L3 ", "c_basics")
+        `CHECK_SERIAL(m_l3_cb, s_l3_cb, l3_cb_rx_at_exit, "L3 ", "c_basics")
 
         $display("--------------------------------------------------");
         if (errors == 0) $display("SOC: ALL TESTS PASSED (%0d checks)", checks);

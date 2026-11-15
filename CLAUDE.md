@@ -51,6 +51,7 @@ build/           generated artifacts (gitignored); Quartus runs in build/<board>
 ```
 ```sh
 make sim  MOD=<mod>        # compile rtl/<mod>.v + tb/tb_lib.v + tb/<mod>_tb.v, run, check
+                           #   (plus the submodules listed in the Makefile's DEPS_<mod>)
 make wave MOD=<mod>        # same, then open build/<mod>.vcd in gtkwave
 make run   PROG=<prog>     # run sw/<prog>.c|.S (or tb/): console output, exit code, CPI
                            #   LAT=1|3 for slow memory, TRACE=1 for the retire log
@@ -170,13 +171,18 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     on the board). **DE10-Lite UART TX: done**: `rtl/uart_tx.v` (8N1, valid/ready) and
     `uart_hello_top` (a numbered line per second; 210 LEs, Fmax 131 MHz), verified on the
     board with the PL2303 on JP1 pins 28 (TX -> adapter RXD), 30 (GND), 32 (RX <- adapter
-    TXD); RX is only an activity LED until there is a `uart_rx`. Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
+    TXD); RX is only an activity LED until there is a `uart_rx`. **UART on the SoC: done
+    in sim**: `console.v` owns a `uart_tx`; a char store prints as an event *and* on
+    `soc.serial_tx`, and completes when the transmitter takes the byte (`d_ready` stall
+    only if the line is still busy); exit completes only once the line is idle. The baud
+    rate is a `soc` parameter, default a sim speed (4 cycles/bit at 10 ns, which makes
+    printing C programs' CPI > 1); `console_tb` unit test; `soc_tb` decodes the line. Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
     iverilog `-g2005` stays the strict language check.
   - Memory must read on the clock edge (block RAM). Loads: one extra cycle through the
     existing `d_ready` stall. Fetch: present the *next* PC to the RAM one edge early, so
     the instruction for the current PC is ready at the start of the cycle.
   - DE10-Lite output: 7-segment + LEDs first; then `printf` through **our own UART**
-    (`rtl/uart_tx.v` behind a console-style MMIO device: next step) to a PL2303 USB-serial board set to 3.3 V
+    (`rtl/uart_tx.v` inside the console: done in sim) to a PL2303 USB-serial board set to 3.3 V
     on the GPIO header (GND, TXD, RXD only; never its VCCIO). The board's only USB port is
     the USB-Blaster (no USB-serial chip), and its JTAG UART would need Platform Designer.
     The same UART serves the DVK600 through its RS-232 port.

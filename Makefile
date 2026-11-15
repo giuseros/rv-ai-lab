@@ -22,10 +22,12 @@ IVFLAGS := -g2005 -Wall -I rtl
 # soc.v instantiates every other module, so it needs the whole rtl/ tree. Every
 # testbench may use tb/tb_lib.v; -s picks <MOD>_tb as the one top module, so the
 # library's (and rtl/'s) other modules are just parsed, never run.
+# A module built from other modules lists them in DEPS_<MOD>.
+DEPS_console := rtl/uart_tx.v
 ifeq ($(MOD),soc)
 SRCS := $(wildcard rtl/*.v) tb/tb_lib.v tb/$(MOD)_tb.v
 else
-SRCS := rtl/$(MOD).v tb/tb_lib.v tb/$(MOD)_tb.v
+SRCS := rtl/$(MOD).v $(DEPS_$(MOD)) tb/tb_lib.v tb/$(MOD)_tb.v
 endif
 
 # Test programs: .S -> .hex (one 32-bit little-endian word per line, for

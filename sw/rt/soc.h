@@ -19,9 +19,13 @@
 #define CONSOLE (*(volatile uint8_t  *)CONSOLE_ADDR)
 #define EXIT    (*(volatile uint32_t *)EXIT_ADDR)
 
+// The character also goes out of the serial line. The line is slow, so a
+// store that finds it still sending the previous character waits (the CPU
+// stalls) until it is free: printing costs time, but nothing is ever lost.
 static inline void putchar(int c) { CONSOLE = (uint8_t)c; }
 
-// End the program now (returning from main does the same).
+// End the program now (returning from main does the same). The store waits
+// until the serial line has sent everything printed.
 static inline __attribute__((noreturn)) void exit(int code)
 {
     EXIT = (uint32_t)code;

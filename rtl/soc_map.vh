@@ -8,8 +8,10 @@
 //
 //   region 0  0x0000_0000 - 0x0FFF_FFFF   RAM (16 KiB, aliased every 16 KiB)
 //   region 1  0x1000_0000 - 0x1FFF_FFFF   I/O
-//                0x1000_0000  console: store a byte  -> print it
-//                0x1000_0004  exit:    store a word  -> end the simulation
+//                0x1000_0000  console: store a byte  -> print it (as a testbench event
+//                             and on the serial line; waits while the line is busy)
+//                0x1000_0004  exit:    store a word  -> end the simulation (waits until
+//                             the line is idle: everything printed has been sent)
 //   others                                unmapped: stores dropped, loads read 0
 
 `ifndef SOC_MAP_VH
