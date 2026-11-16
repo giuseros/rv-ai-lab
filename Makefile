@@ -123,26 +123,40 @@ $(BUILD)/$(MOD).vvp: $(SRCS) | $(BUILD)
 #   make fpga-sim BOARD=de10-lite TOP=blinky   # simulate the top first
 #   make fpga     BOARD=de10-lite TOP=blinky   # synthesise, fit, report
 #   make program  BOARD=de10-lite TOP=blinky   # load it into the FPGA (until power-off)
+# TOP=soc runs a program, built into the bitstream as the RAM's contents:
+#   make fpga BOARD=de10-lite TOP=soc PROG=primes   (PROG: sw/ or tb/, default primes)
+# Each program gets its own Quartus directory, build/<BOARD>/soc-<PROG>/, so
+# switching programs never reuses a bitstream built for another one. Its
+# testbench always runs primes, whose answer it knows.
 QUARTUS  ?= $(HOME)/altera_lite/25.1std/quartus/bin
 BOARD    ?= de10-lite
 TOP      ?= blinky
 FPGA_DIR := $(BUILD)/$(BOARD)/$(TOP)
+ifeq ($(TOP),soc)
+PROG     ?= primes
+FPGA_DIR := $(BUILD)/$(BOARD)/soc-$(PROG)
+FPGA_HEX := $(BUILD)/$(PROG).hex
+FPGA_SIM_HEX := $(BUILD)/primes.hex
+endif
 SOF      := $(FPGA_DIR)/output_files/$(TOP)_top.sof
 FPGA_SRC := $(wildcard rtl/*.v rtl/*.vh) \
             $(filter-out %_tb.v,$(wildcard boards/$(BOARD)/*.v)) \
             $(wildcard boards/$(BOARD)/*.tcl boards/$(BOARD)/*.sdc)
 
-fpga-sim: | $(BUILD)
+# Board modules that are not tops (e.g. a PLL wrapper): every top may use them.
+BOARD_LIB := $(filter-out %_tb.v %_top.v,$(wildcard boards/$(BOARD)/*.v))
+
+fpga-sim: $(FPGA_SIM_HEX) | $(BUILD)
 	@iverilog $(IVFLAGS) -s $(TOP)_top_tb -o $(BUILD)/$(BOARD)-$(TOP).vvp \
-	    $(wildcard rtl/*.v) tb/tb_lib.v boards/$(BOARD)/$(TOP)_top.v boards/$(BOARD)/$(TOP)_top_tb.v
-	@vvp -n $(BUILD)/$(BOARD)-$(TOP).vvp
+	    $(wildcard rtl/*.v) tb/tb_lib.v $(BOARD_LIB) boards/$(BOARD)/$(TOP)_top.v boards/$(BOARD)/$(TOP)_top_tb.v
+	@vvp -n $(BUILD)/$(BOARD)-$(TOP).vvp | grep -vE "Not enough words in the file"
 
 # The full Quartus log goes to quartus.log; on failure, its errors are shown.
-$(SOF): $(FPGA_SRC)
+$(SOF): $(FPGA_SRC) $(FPGA_HEX)
 	@mkdir -p $(FPGA_DIR)
 	@echo "quartus: building $(BOARD) $(TOP)_top (log: $(FPGA_DIR)/quartus.log)"
 	@cd $(FPGA_DIR) && $(QUARTUS)/quartus_sh -t $(CURDIR)/boards/$(BOARD)/build.tcl \
-	    $(TOP) $(CURDIR) > quartus.log 2>&1 \
+	    $(TOP) $(CURDIR) $(if $(FPGA_HEX),$(CURDIR)/$(FPGA_HEX)) > quartus.log 2>&1 \
 	 || { grep -E "^Error|BUILD FAILED" quartus.log; exit 1; }
 
 # What it costs and how fast it could run, from Quartus's reports.

@@ -45,9 +45,12 @@ tb/tb_lib.v      console_sink, retire_log,    tb/c_*.c   C regression programs (
 tb/run_tb.v      runs any one program         sw/        programs to run (make run)
 sw/rt/           C runtime: crt0.S, link.ld, soc.h, runtime.c
 boards/<board>/  one folder per FPGA board: <top>_top.v + <top>_top_tb.v (blinky = smoke
-                 test, written first for every board), pins.tcl, timing.sdc, build.tcl,
-                 reference/README.md (where to get the vendor manuals; PDFs gitignored)
+                 test, written first for every board), other board modules (any non-top
+                 .v, e.g. max10_pll.v: built and simulated with every top), pins.tcl,
+                 timing.sdc, build.tcl, reference/README.md (where to get the vendor
+                 manuals; PDFs gitignored)
 build/           generated artifacts (gitignored); Quartus runs in build/<board>/<top>/
+                 (build/<board>/soc-<prog>/ for the SoC top: one per program)
 ```
 ```sh
 make sim  MOD=<mod>        # compile rtl/<mod>.v + tb/tb_lib.v + tb/<mod>_tb.v, run, check
@@ -64,6 +67,8 @@ make trace PROG=<prog>     # retire log: one line per executed instruction + its
 make fpga-sim BOARD=<b> TOP=<t>   # simulate boards/<b>/<t>_top.v with its testbench
 make fpga     BOARD=<b> TOP=<t>   # Quartus: synthesise, fit, assemble, time; report LEs/Fmax
 make program  BOARD=<b> TOP=<t>   # load the .sof over JTAG (volatile: gone at power-off)
+                                  #   TOP=soc takes PROG=<prog> (default primes): the program
+                                  #   is the RAM's initial contents, so a new one = a new build
 make clean
 ```
 `MOD=soc` compiles all of `rtl/*.v`. The `.S -> .hex` rule is `as -march=rv32i
@@ -169,7 +174,7 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     `console_sink` prints/records them. This is the template for future MMIO devices.
   - Then `crt0.S`, a linker script, `volatile` MMIO from C, and a hello-world.
   - The existing `p_*.S` programs and retire log must keep passing on the SoC.
-- **Phase 3 — FPGA bring-up (next).** Target several boards, starting with the
+- **Phase 3 — FPGA bring-up (in progress).** Target several boards, starting with the
   **Terasic DE10-Lite** (Altera MAX 10 10M50, Quartus Prime Lite, built-in USB-Blaster).
   Later the **DE10-Nano** (Cyclone V SoC; its USB serial port belongs to the ARM side) and
   a **Waveshare DVK600 + Core3S500E** (Spartan-3E XC3S500E: Xilinx ISE 14.7 only, external
@@ -194,7 +199,17 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     **Clocked RAM: done in sim** (`ram_sync`, see Design decisions); every program passes
     on it with an identical retire log. Quartus synthesis of `soc` with `SYNC_RAM=1`:
     3,769 LEs, 1,094 registers (1,024 are the register file), 4 initialised M9K RAMs.
-    Next: `boards/de10-lite/soc_top.v`. Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
+    **DE10-Lite SoC: done, verified on the board** (`soc_top`): `sw/primes.c` prints over
+    the UART, byte-identical to simulation, and its exit code shows on HEX5..0 (`01295F`);
+    KEY[0] reruns it (RAM is not reloaded: crt0 re-zeroes .bss, initialised globals keep
+    their last values). The single-cycle core makes only ~40 MHz (slow corner): its
+    critical path is the whole loop in one cycle, RAM out -> regfile read mux -> ALU ->
+    console address decode -> `d_ready` -> stall -> PC mux -> `i_next` -> RAM address
+    (the combinational ready alone is ~4 ns). So it runs at 25 MHz from a MAX 10 PLL
+    (`max10_pll.v`: `altpll` for Quartus, a behavioural model under `` `ifdef __ICARUS__ ``,
+    since iverilog can't compile Quartus's `altera_mf.v`); 3,131 LEs, setup slack +7.9 ns.
+    Next: `uart_rx` and a bootloader, so a new program needn't be a new 8-minute build.
+    Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
     iverilog `-g2005` stays the strict language check.
   - Memory must read on the clock edge (block RAM): done, `ram_sync` (above).
   - DE10-Lite output: 7-segment + LEDs first; then `printf` through **our own UART**
@@ -209,6 +224,8 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     `jtagconfig` hangs after a replug, a stale `jtagd` holds the old USB handle (kill it).
     Reading the serial port: `stty ... raw clocal` (without `clocal` a read can wait for
     carrier forever); a shell older than the `dialout` membership needs `sg dialout -c`.
+    Programs print bare `\n`: `picocom -b 115200 --imap lfcrlf /dev/ttyUSB0` (`cat` is
+    fine as is). Only one reader per tty: two split the bytes between them.
     RAM with initial contents needs `INTERNAL_FLASH_UPDATE_MODE "SINGLE IMAGE WITH ERAM"`
     (in `build.tcl`): in the default mode the MAX 10 can't initialise RAM. Check a RAM
     with a synthesis-only run first (minutes) and read the map report's RAM Summary

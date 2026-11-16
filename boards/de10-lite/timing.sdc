@@ -5,6 +5,9 @@
 # and reports the highest frequency the design could run at (Fmax).
 
 create_clock -name clk50 -period 20.000 [get_ports MAX10_CLK1_50]   ;# 50 MHz
+# A top that runs on a PLL output (soc_top: 25 MHz): the analyser creates that
+# clock from the PLL's own settings. Nothing happens in a top without a PLL.
+derive_pll_clocks
 derive_clock_uncertainty
 
 # Switches and keys change whenever a person moves them, unrelated to the clock
