@@ -208,7 +208,13 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     (the combinational ready alone is ~4 ns). So it runs at 25 MHz from a MAX 10 PLL
     (`max10_pll.v`: `altpll` for Quartus, a behavioural model under `` `ifdef __ICARUS__ ``,
     since iverilog can't compile Quartus's `altera_mf.v`); 3,131 LEs, setup slack +7.9 ns.
-    Next: `uart_rx` and a bootloader, so a new program needn't be a new 8-minute build.
+    **UART RX: done in sim**: `rtl/uart_rx.v` (8N1, one sample mid-bit, start re-checked
+    at half a bit; `valid` is a one-cycle pulse, no ready; `armed` = a byte starts only on
+    a falling edge after the line was seen high, so a break or a reset released mid-byte
+    gives no phantom bytes); `uart_rx_tb` at 115200 and 59172 baud (a rate that doesn't
+    divide evenly), senders +-3.5%. Next: `uart_echo_top` (RX on the board, no CPU), then
+    RX as a console device + `getchar()`, then a bootloader, so a new program needn't be
+    a new 8-minute build.
     Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
     iverilog `-g2005` stays the strict language check.
   - Memory must read on the clock edge (block RAM): done, `ram_sync` (above).
