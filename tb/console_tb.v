@@ -15,8 +15,9 @@
 //     (the other lanes hold different, non-zero bytes)
 //   - while the line is busy, loads, stores elsewhere in I/O and a byte to
 //     CONSOLE_ADDR+1 do not wait and print nothing
-//   - exit waits for the line to go idle, so every character has been received
-//     when the exit event fires; exit while idle does not wait
+//   - exit waits for the line to go idle (one cycle after the next character
+//     could have been taken), so every character has been received when the
+//     exit event fires; exit while idle does not wait
 //   - the line carries exactly the characters printed, in order, back to back,
 //     with no framing errors
 // The transmitter's frame is 320 cycles, more than the latency counter's 8 bits
@@ -35,9 +36,10 @@ module console_check #(parameter LAT = 0, parameter [8*3:1] NAME = "") (
     localparam CLK_HZ = 100_000_000;
     localparam BAUD   = 3_125_000;          // 32 cycles a bit
     localparam DIV    = 32;
-    // uart_tx takes a byte on the edge after the one that ends the previous
-    // frame, so back-to-back characters are 10 bit times plus one cycle apart.
-    localparam FRAME  = 10 * DIV + 1;
+    // uart_tx takes the next byte on the edge that ends the previous frame, so
+    // back-to-back characters are exactly 10 bit times apart. Exit waits for the
+    // line to be idle, which it is from that edge on: it completes one edge later.
+    localparam FRAME  = 10 * DIV;
 
     reg         rst = 1'b1;
     reg         valid = 1'b0;
@@ -134,7 +136,7 @@ module console_check #(parameter LAT = 0, parameter [8*3:1] NAME = "") (
 
         // ---- exit waits until the line is idle ----
         req(`EXIT_ADDR, 4'b1111, 32'hC0DE_0007);
-        chk("exit while busy: completes when the frame ends", cycles_apart(t_done, t_c, FRAME));
+        chk("exit while busy: completes once the frame has ended", cycles_apart(t_done, t_c, FRAME + 1));
         #1;
         chk("... by then all 3 characters have been received", mon.count == 3);
         chk("... one exit event, the whole word",       nexit == 1 && code == 32'hC0DE_0007);

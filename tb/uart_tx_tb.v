@@ -19,7 +19,10 @@
 // must be high then: with back-to-back bytes only, a line that idled LOW was
 // invisible (the next start bit is low anyway). Bit timing is checked to 0.5%:
 // correct rounding errs by at most 0.5/DIV (0.007% and 0.16% here), while a bit
-// one cycle too long is 0.23% and 0.96% off.
+// one cycle too long is 0.23% and 0.96% off. Separately, and to the cycle: a byte
+// offered back to back is taken on the edge that ends the stop bit (ready in
+// that last cycle only, idle one cycle later), so frames are exactly 10 * DIV
+// cycles apart; one idle cycle between them would make an echo fall behind.
 `timescale 1ns/1ps
 
 module uart_tx_tb;
@@ -27,10 +30,10 @@ module uart_tx_tb;
     // ---- the board's rate ----
     reg        clk = 0, rst = 1, valid = 0;
     reg  [7:0] data = 8'h00;
-    wire       ready, tx;
+    wire       ready, idle, tx;
     always #10 clk = !clk;                          // 50 MHz
     uart_tx #(.CLK_HZ(50_000_000), .BAUD(115_200)) dut (
-        .clk(clk), .rst(rst), .valid(valid), .data(data), .ready(ready), .tx(tx));
+        .clk(clk), .rst(rst), .valid(valid), .data(data), .ready(ready), .idle(idle), .tx(tx));
     uart_monitor #(.BAUD(115_200)) mon (.line(tx));
 
     // ---- a second rate ----
@@ -91,6 +94,26 @@ module uart_tx_tb;
     end
     endtask
 
+    // Called right after send() took a byte, with valid dropped: watch the frame
+    // cycle by cycle, n = 0 being the start bit's first. Records the first cycle
+    // ready is 1 and how many cycles it is 1 before idle, the first cycle idle is
+    // 1, and any cycle of the stop bit (n >= 9 DIV) where the line is low.
+    integer ready_at, ready_n, idle_at, stop_bad, n;
+    task frame_timing;
+    begin
+        ready_at = -1; ready_n = 0; idle_at = -1; stop_bad = 0;
+        for (n = 0; idle_at < 0 && n < 20 * 434; n = n + 1) begin
+            if (idle === 1'b1) idle_at = n;
+            else if (ready === 1'b1) begin
+                if (ready_at < 0) ready_at = n;
+                ready_n = ready_n + 1;
+            end
+            if (n >= 9 * 434 && tx !== 1'b1) stop_bad = stop_bad + 1;
+            @(negedge clk);
+        end
+    end
+    endtask
+
     reg [8*6:1] hello;
     integer i, base, bad;
 
@@ -108,8 +131,11 @@ module uart_tx_tb;
 
         // ---- single bytes, with idle time between ----
         send(8'h01, 0);
-        chk("busy (ready 0) right after taking a byte", ready === 1'b0);
-        while (!ready) @(negedge clk);
+        frame_timing;
+        chk("busy (ready 0) right after taking a byte", ready_at > 0);
+        chk("ready in the stop bit's last cycle only",  ready_at == 10 * 434 - 1 && ready_n == 1);
+        chk("idle once the stop bit has ended, not before", idle_at == 10 * 434);
+        chk("line high through the whole stop bit",     stop_bad == 0);
         idle_gap;
         for (i = 1; i < 6; i = i + 1) begin
             case (i)
@@ -141,6 +167,10 @@ module uart_tx_tb;
         for (i = 7; i < 12; i = i + 1)              // [6] follows an idle gap
             if (!period_ok(mon.period[i], 115_200.0)) bad = bad + 1;
         chk("back to back: 10 bit periods each (0.5%)", bad == 0);
+        bad = 0;
+        for (i = 7; i < 12; i = i + 1)
+            if (mon.period[i] != 10 * 434 * 20.0) bad = bad + 1;
+        chk("back to back: exactly 10 * 434 cycles, no gap", bad == 0);
         $display("        (measured %0.1f ns per byte; nominal %0.1f)",
                  mon.period[8], 10.0e9 / 115_200.0);
         chk("no framing errors, no false starts", mon.framing_errors == 0 && mon.false_starts == 0);

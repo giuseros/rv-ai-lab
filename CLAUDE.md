@@ -212,9 +212,17 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     at half a bit; `valid` is a one-cycle pulse, no ready; `armed` = a byte starts only on
     a falling edge after the line was seen high, so a break or a reset released mid-byte
     gives no phantom bytes); `uart_rx_tb` at 115200 and 59172 baud (a rate that doesn't
-    divide evenly), senders +-3.5%. Next: `uart_echo_top` (RX on the board, no CPU), then
-    RX as a console device + `getchar()`, then a bootloader, so a new program needn't be
-    a new 8-minute build.
+    divide evenly), senders +-3.5%. `uart_tx` now raises `ready` in the stop bit's last
+    cycle too (a flop, `last`), so back-to-back frames are exactly 10 * DIV cycles; it
+    used to idle one cycle between them, 0.02% slow, enough for an echo to fall behind
+    a PC at the same nominal rate. Its new `idle` output (last frame over) is what the
+    console's exit waits for. **`uart_echo_top`: done, verified on the board** (262 LEs, Fmax 182 MHz; 50 MHz,
+    no PLL): echoes UART_RX to UART_TX through a one-byte buffer (rx has no ready), HEX1..0
+    = last byte, HEX5..2 = bytes received, LEDR[0] framing error, LEDR[1] byte dropped
+    (both sticky). Its testbench: a paste from a PC 0.2% fast (needs the buffer; at
+    exactly equal rates and fixed phase it wouldn't), and a 1%-fast sender whose
+    arrivals sweep every cycle of the echo's frame. Next: RX as a console device +
+    `getchar()`, then a bootloader, so a new program needn't be a new 8-minute build.
     Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
     iverilog `-g2005` stays the strict language check.
   - Memory must read on the clock edge (block RAM): done, `ram_sync` (above).

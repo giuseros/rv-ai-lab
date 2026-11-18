@@ -86,19 +86,21 @@ module console #(
 
     // ---- the transmitter ----
     // Offered the character once the latency has passed; it takes it in a cycle
-    // where it is also ready (idle). tx_valid must not depend on tx_ready (the
-    // handshake rule), which is why it is not simply char_valid.
+    // where it is also ready (idle, or ending a stop bit). tx_valid must not
+    // depend on tx_ready (the handshake rule), which is why it is not simply
+    // char_valid.
     wire tx_valid = valid && waited_enough && is_char;
-    wire tx_ready;
+    wire tx_ready, tx_idle;
 
     uart_tx #(.CLK_HZ(CLK_HZ), .BAUD(BAUD)) u_tx (
         .clk(clk), .rst(rst), .valid(tx_valid), .data(wdata[7:0]),
-        .ready(tx_ready), .tx(tx));
+        .ready(tx_ready), .idle(tx_idle), .tx(tx));
 
     // ---- completing the request ----
-    // tx_ready means "idle": for a character, that the byte is taken now; for
-    // exit, that the last frame has ended.
-    wire tx_wait = (is_char || is_exit) && !tx_ready;
+    // A character waits for tx_ready (the byte is taken now); exit waits for
+    // tx_idle (the last frame has ended), which comes one cycle later when a
+    // frame is going out.
+    wire tx_wait = (is_char && !tx_ready) || (is_exit && !tx_idle);
     assign ready = valid && waited_enough && !tx_wait;
 
     wire store_done = ready && is_store;
