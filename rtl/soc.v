@@ -14,6 +14,7 @@
 //                                            +---------+     (to the testbench)
 //                                                 |
 //                                                 +--------> serial_tx (8N1)
+//                                                 +<-------- serial_rx (8N1)
 //
 // The bus routes each data request by address (see soc_map.vh). Instruction
 // fetch stays a direct connection to the RAM: code only ever comes from RAM.
@@ -22,7 +23,8 @@
 // the SoC's outputs. Acting on them ($write, ending the simulation) is the
 // testbench's job; everything in here is plain RTL. It also sends every printed
 // character out of serial_tx, for a board's UART pin, and makes the CPU wait
-// (d_ready) while the line is busy.
+// (d_ready) while the line is busy. Bytes arriving on serial_rx wait in the
+// console until the program loads them (RX_DATA, soc_map.vh).
 //
 // The RAM is one of two, chosen by SYNC_RAM:
 //   0  memory.v:   reads in the same cycle (an ideal memory; simulation only,
@@ -59,8 +61,10 @@ module soc #(
     output wire        exit_valid,
     output wire [31:0] exit_code,
 
-    // serial console, 8N1, idle high: to a board's UART TX pin
-    output wire        serial_tx
+    // serial console, 8N1, idle high: to a board's UART TX pin, and from its
+    // RX pin (asynchronous; tie it to 1 if nothing drives it: idle)
+    output wire        serial_tx,
+    input  wire        serial_rx
 );
 
     // fetch port
@@ -178,7 +182,8 @@ module soc #(
         .char_data  (char_data),
         .exit_valid (exit_valid),
         .exit_code  (exit_code),
-        .tx         (serial_tx)
+        .tx         (serial_tx),
+        .rx         (serial_rx)
     );
 
 endmodule

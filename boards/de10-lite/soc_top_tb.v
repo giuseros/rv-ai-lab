@@ -50,7 +50,7 @@ module soc_top_tb;
     soc_top #(.HEXFILE("build/primes.hex"), .CLK_HZ(CLK_HZ), .BAUD(BAUD)) dut (
         .MAX10_CLK1_50(clk), .KEY(KEY), .LEDR(LEDR),
         .HEX0(HEX0), .HEX1(HEX1), .HEX2(HEX2), .HEX3(HEX3), .HEX4(HEX4), .HEX5(HEX5),
-        .UART_TX(UART_TX));
+        .UART_TX(UART_TX), .UART_RX(1'b1));     // nothing typed: primes doesn't read
     uart_monitor #(.BAUD(BAUD)) mon (.line(UART_TX));
 
     always #(CYC / 2) clk = !clk;

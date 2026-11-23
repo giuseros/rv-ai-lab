@@ -37,7 +37,7 @@ module run_tb;
 
     soc #(.WORDS(WORDS), .HEXFILE(HEXFILE), .RAM_LATENCY(LAT), .IO_LATENCY(LAT),
           .RAM_FILL(FILL), .SYNC_RAM(SYNC)) dut (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(char_valid), .char_data(char_data),
         .exit_valid(exit_valid), .exit_code(exit_code));
 

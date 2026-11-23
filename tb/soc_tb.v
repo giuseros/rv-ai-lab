@@ -4,7 +4,7 @@
 // Every program in tb/p_*.S runs on its own SoC, and the whole set runs four
 // times: with memory answering instantly (latency 0), after 1 extra cycle,
 // after 3, and on the clocked RAM an FPGA has (ram_sync: fetch one edge early,
-// loads one cycle late). All eighteen SoCs share a clock and reset and run until every one has
+// loads one cycle late). All the SoCs share a clock and reset and run until every one has
 // reached its final `loop: jal x0, loop` (or a timeout). They must end in
 // exactly the same architectural state, and p_hello must print the same text. Latency may change how long a program takes, never what
 // it computes: that is what the CPU's stall on d_ready guarantees.
@@ -107,6 +107,38 @@
     chk(S.exited,       32'd1,        {T, NAME, " wrote the exit register"}); \
     chk(S.code,         32'd0,        {T, NAME, " exit code (failures)"});
 
+// c_rx reads its serial line: the typist must have typed its whole script
+// (the program checks what it received and exits with its failure count).
+`define CHECK_RX(C, S, Y, T) \
+    `CHECK_C(C, S, T, "c_rx") \
+    chk(Y.typed, 32'd5, {T, "c_rx typist typed all 5 items"});
+
+// rx_typist -- the user at the other end of c_rx's serial line (tb/c_rx.c has
+// the script). It watches what the program prints, and at each prompt (a '>'
+// printed) types the next item, starting 3 ns after the edge that printed it,
+// so the line never changes on a clock edge. The sim line is 4 cycles a bit:
+// a byte every 40 cycles when typing back to back.
+module rx_typist #(parameter BAUD = 25_000_000) (
+    input  wire       clk, rst,
+    input  wire       char_valid,
+    input  wire [7:0] char_data,
+    output wire       line
+);
+    uart_driver #(.BAUD(BAUD)) u (.line(line));
+    integer prompts = 0;                        // '>' printed so far
+    integer typed   = 0;                        // script items finished
+    always @(posedge clk)
+        if (!rst && char_valid && char_data == ">") prompts = prompts + 1;
+
+    initial begin
+        wait (prompts == 1); #3; u.send_text("Hello, RISC-V!\n");   typed = 1;
+        wait (prompts == 2); #3; u.send_text("31415926\n");         typed = 2;
+        wait (prompts == 3); #3; u.send("z", 1'b1);                 typed = 3;
+        wait (prompts == 4); #3; u.send_text("ABCDEFGHIJKLMNOPQ");  typed = 4;
+        wait (prompts == 5); #3; u.send("x", 1'b0);                 typed = 5;   // stop bit 0
+    end
+endmodule
+
 module soc_tb;
 
     localparam WORDS  = 256;     // 1 KiB, enough for these programs
@@ -119,42 +151,42 @@ module soc_tb;
 
     // RAM latency 0 (instant)
     soc #(.WORDS(WORDS), .HEXFILE("build/p_arith.hex"), .RAM_LATENCY(0)) c_arith (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_mem.hex"), .RAM_LATENCY(0)) c_mem (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_branch.hex"), .RAM_LATENCY(0)) c_branch (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_jump.hex"), .RAM_LATENCY(0)) c_jump (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     // RAM latency 1: every load/store waits 1 extra cycle
     soc #(.WORDS(WORDS), .HEXFILE("build/p_arith.hex"), .RAM_LATENCY(1)) l1_arith (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_mem.hex"), .RAM_LATENCY(1)) l1_mem (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_branch.hex"), .RAM_LATENCY(1)) l1_branch (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_jump.hex"), .RAM_LATENCY(1)) l1_jump (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     // RAM latency 3: every load/store waits 3 extra cycles
     soc #(.WORDS(WORDS), .HEXFILE("build/p_arith.hex"), .RAM_LATENCY(3)) l3_arith (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_mem.hex"), .RAM_LATENCY(3)) l3_mem (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_branch.hex"), .RAM_LATENCY(3)) l3_branch (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_jump.hex"), .RAM_LATENCY(3)) l3_jump (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
 
     // p_hello: prints on the console, at the same three latencies (RAM and I/O).
@@ -163,7 +195,7 @@ module soc_tb;
     wire [31:0] c_hello_code;
     wire        c_hello_tx;
     soc #(.WORDS(WORDS), .HEXFILE("build/p_hello.hex"), .RAM_LATENCY(0), .IO_LATENCY(0)) c_hello (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(c_hello_cv), .char_data(c_hello_ch),
         .exit_valid(c_hello_ev), .exit_code(c_hello_code), .serial_tx(c_hello_tx));
     uart_monitor #(.BAUD(SERIAL_BAUD)) m_c_hello (.line(c_hello_tx));
@@ -175,7 +207,7 @@ module soc_tb;
     wire [31:0] l1_hello_code;
     wire        l1_hello_tx;
     soc #(.WORDS(WORDS), .HEXFILE("build/p_hello.hex"), .RAM_LATENCY(1), .IO_LATENCY(1)) l1_hello (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(l1_hello_cv), .char_data(l1_hello_ch),
         .exit_valid(l1_hello_ev), .exit_code(l1_hello_code), .serial_tx(l1_hello_tx));
     uart_monitor #(.BAUD(SERIAL_BAUD)) m_l1_hello (.line(l1_hello_tx));
@@ -187,7 +219,7 @@ module soc_tb;
     wire [31:0] l3_hello_code;
     wire        l3_hello_tx;
     soc #(.WORDS(WORDS), .HEXFILE("build/p_hello.hex"), .RAM_LATENCY(3), .IO_LATENCY(3)) l3_hello (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(l3_hello_cv), .char_data(l3_hello_ch),
         .exit_valid(l3_hello_ev), .exit_code(l3_hello_code), .serial_tx(l3_hello_tx));
     uart_monitor #(.BAUD(SERIAL_BAUD)) m_l3_hello (.line(l3_hello_tx));
@@ -202,7 +234,7 @@ module soc_tb;
     wire        c_cb_tx;
     soc #(.WORDS(4096), .HEXFILE("build/c_basics.hex"), .RAM_LATENCY(0), .IO_LATENCY(0),
           .RAM_FILL(32'hDEAD_BEEF)) c_cb (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(c_cb_cv), .char_data(c_cb_ch),
         .exit_valid(c_cb_ev), .exit_code(c_cb_code), .serial_tx(c_cb_tx));
     uart_monitor #(.BAUD(SERIAL_BAUD)) m_c_cb (.line(c_cb_tx));
@@ -215,7 +247,7 @@ module soc_tb;
     wire        l1_cb_tx;
     soc #(.WORDS(4096), .HEXFILE("build/c_basics.hex"), .RAM_LATENCY(1), .IO_LATENCY(1),
           .RAM_FILL(32'hDEAD_BEEF)) l1_cb (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(l1_cb_cv), .char_data(l1_cb_ch),
         .exit_valid(l1_cb_ev), .exit_code(l1_cb_code), .serial_tx(l1_cb_tx));
     uart_monitor #(.BAUD(SERIAL_BAUD)) m_l1_cb (.line(l1_cb_tx));
@@ -228,7 +260,7 @@ module soc_tb;
     wire        l3_cb_tx;
     soc #(.WORDS(4096), .HEXFILE("build/c_basics.hex"), .RAM_LATENCY(3), .IO_LATENCY(3),
           .RAM_FILL(32'hDEAD_BEEF)) l3_cb (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(l3_cb_cv), .char_data(l3_cb_ch),
         .exit_valid(l3_cb_ev), .exit_code(l3_cb_code), .serial_tx(l3_cb_tx));
     uart_monitor #(.BAUD(SERIAL_BAUD)) m_l3_cb (.line(l3_cb_tx));
@@ -236,25 +268,72 @@ module soc_tb;
         .char_valid(l3_cb_cv), .char_data(l3_cb_ch),
         .exit_valid(l3_cb_ev), .exit_code(l3_cb_code));
 
+    // c_rx: compiled C reading its serial line; rx_typist types the script
+    wire        c_rx_cv, c_rx_ev;
+    wire [7:0]  c_rx_ch;
+    wire [31:0] c_rx_code;
+    wire        c_rx_tx, c_rx_line;
+    soc #(.WORDS(4096), .HEXFILE("build/c_rx.hex"), .RAM_LATENCY(0), .IO_LATENCY(0),
+          .RAM_FILL(32'hDEAD_BEEF)) c_rx (
+        .clk(clk), .rst(rst), .serial_rx(c_rx_line),
+        .char_valid(c_rx_cv), .char_data(c_rx_ch),
+        .exit_valid(c_rx_ev), .exit_code(c_rx_code), .serial_tx(c_rx_tx));
+    uart_monitor #(.BAUD(SERIAL_BAUD)) m_c_rx (.line(c_rx_tx));
+    console_sink s_c_rx (.clk(clk), .rst(rst),
+        .char_valid(c_rx_cv), .char_data(c_rx_ch),
+        .exit_valid(c_rx_ev), .exit_code(c_rx_code));
+    rx_typist #(.BAUD(SERIAL_BAUD)) y_c_rx (.clk(clk), .rst(rst),
+        .char_valid(c_rx_cv), .char_data(c_rx_ch), .line(c_rx_line));
+    wire        l1_rx_cv, l1_rx_ev;
+    wire [7:0]  l1_rx_ch;
+    wire [31:0] l1_rx_code;
+    wire        l1_rx_tx, l1_rx_line;
+    soc #(.WORDS(4096), .HEXFILE("build/c_rx.hex"), .RAM_LATENCY(1), .IO_LATENCY(1),
+          .RAM_FILL(32'hDEAD_BEEF)) l1_rx (
+        .clk(clk), .rst(rst), .serial_rx(l1_rx_line),
+        .char_valid(l1_rx_cv), .char_data(l1_rx_ch),
+        .exit_valid(l1_rx_ev), .exit_code(l1_rx_code), .serial_tx(l1_rx_tx));
+    uart_monitor #(.BAUD(SERIAL_BAUD)) m_l1_rx (.line(l1_rx_tx));
+    console_sink s_l1_rx (.clk(clk), .rst(rst),
+        .char_valid(l1_rx_cv), .char_data(l1_rx_ch),
+        .exit_valid(l1_rx_ev), .exit_code(l1_rx_code));
+    rx_typist #(.BAUD(SERIAL_BAUD)) y_l1_rx (.clk(clk), .rst(rst),
+        .char_valid(l1_rx_cv), .char_data(l1_rx_ch), .line(l1_rx_line));
+    wire        l3_rx_cv, l3_rx_ev;
+    wire [7:0]  l3_rx_ch;
+    wire [31:0] l3_rx_code;
+    wire        l3_rx_tx, l3_rx_line;
+    soc #(.WORDS(4096), .HEXFILE("build/c_rx.hex"), .RAM_LATENCY(3), .IO_LATENCY(3),
+          .RAM_FILL(32'hDEAD_BEEF)) l3_rx (
+        .clk(clk), .rst(rst), .serial_rx(l3_rx_line),
+        .char_valid(l3_rx_cv), .char_data(l3_rx_ch),
+        .exit_valid(l3_rx_ev), .exit_code(l3_rx_code), .serial_tx(l3_rx_tx));
+    uart_monitor #(.BAUD(SERIAL_BAUD)) m_l3_rx (.line(l3_rx_tx));
+    console_sink s_l3_rx (.clk(clk), .rst(rst),
+        .char_valid(l3_rx_cv), .char_data(l3_rx_ch),
+        .exit_valid(l3_rx_ev), .exit_code(l3_rx_code));
+    rx_typist #(.BAUD(SERIAL_BAUD)) y_l3_rx (.clk(clk), .rst(rst),
+        .char_valid(l3_rx_cv), .char_data(l3_rx_ch), .line(l3_rx_line));
+
     // Clocked RAM (ram_sync), RAM latency 0: what an FPGA build runs.
     soc #(.WORDS(WORDS), .HEXFILE("build/p_arith.hex"), .SYNC_RAM(1)) sr_arith (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_mem.hex"), .SYNC_RAM(1)) sr_mem (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_branch.hex"), .SYNC_RAM(1)) sr_branch (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     soc #(.WORDS(WORDS), .HEXFILE("build/p_jump.hex"), .SYNC_RAM(1)) sr_jump (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(), .char_data(), .exit_valid(), .exit_code());
     wire        sr_hello_cv, sr_hello_ev;
     wire [7:0]  sr_hello_ch;
     wire [31:0] sr_hello_code;
     wire        sr_hello_tx;
     soc #(.WORDS(WORDS), .HEXFILE("build/p_hello.hex"), .SYNC_RAM(1)) sr_hello (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(sr_hello_cv), .char_data(sr_hello_ch),
         .exit_valid(sr_hello_ev), .exit_code(sr_hello_code), .serial_tx(sr_hello_tx));
     uart_monitor #(.BAUD(SERIAL_BAUD)) m_sr_hello (.line(sr_hello_tx));
@@ -267,18 +346,34 @@ module soc_tb;
     wire        sr_cb_tx;
     soc #(.WORDS(4096), .HEXFILE("build/c_basics.hex"), .SYNC_RAM(1),
           .RAM_FILL(32'hDEAD_BEEF)) sr_cb (
-        .clk(clk), .rst(rst),
+        .clk(clk), .rst(rst), .serial_rx(1'b1),
         .char_valid(sr_cb_cv), .char_data(sr_cb_ch),
         .exit_valid(sr_cb_ev), .exit_code(sr_cb_code), .serial_tx(sr_cb_tx));
     uart_monitor #(.BAUD(SERIAL_BAUD)) m_sr_cb (.line(sr_cb_tx));
     console_sink s_sr_cb (.clk(clk), .rst(rst),
         .char_valid(sr_cb_cv), .char_data(sr_cb_ch),
         .exit_valid(sr_cb_ev), .exit_code(sr_cb_code));
+    wire        sr_rx_cv, sr_rx_ev;
+    wire [7:0]  sr_rx_ch;
+    wire [31:0] sr_rx_code;
+    wire        sr_rx_tx, sr_rx_line;
+    soc #(.WORDS(4096), .HEXFILE("build/c_rx.hex"), .SYNC_RAM(1),
+          .RAM_FILL(32'hDEAD_BEEF)) sr_rx (
+        .clk(clk), .rst(rst), .serial_rx(sr_rx_line),
+        .char_valid(sr_rx_cv), .char_data(sr_rx_ch),
+        .exit_valid(sr_rx_ev), .exit_code(sr_rx_code), .serial_tx(sr_rx_tx));
+    uart_monitor #(.BAUD(SERIAL_BAUD)) m_sr_rx (.line(sr_rx_tx));
+    console_sink s_sr_rx (.clk(clk), .rst(rst),
+        .char_valid(sr_rx_cv), .char_data(sr_rx_ch),
+        .exit_valid(sr_rx_ev), .exit_code(sr_rx_code));
+    rx_typist #(.BAUD(SERIAL_BAUD)) y_sr_rx (.clk(clk), .rst(rst),
+        .char_valid(sr_rx_cv), .char_data(sr_rx_ch), .line(sr_rx_line));
 
     // ---- bytes each serial line had delivered when its program exited ----
     integer c_hello_rx_at_exit = -1, l1_hello_rx_at_exit = -1, l3_hello_rx_at_exit = -1;
     integer c_cb_rx_at_exit    = -1, l1_cb_rx_at_exit    = -1, l3_cb_rx_at_exit    = -1;
     integer sr_hello_rx_at_exit = -1, sr_cb_rx_at_exit = -1;
+    integer c_rx_rx_at_exit = -1, l1_rx_rx_at_exit = -1, l3_rx_rx_at_exit = -1, sr_rx_rx_at_exit = -1;
     always @(posedge clk) begin
         if (c_hello_ev)  c_hello_rx_at_exit  = m_c_hello.count;
         if (l1_hello_ev) l1_hello_rx_at_exit = m_l1_hello.count;
@@ -288,6 +383,10 @@ module soc_tb;
         if (l3_cb_ev)    l3_cb_rx_at_exit    = m_l3_cb.count;
         if (sr_hello_ev) sr_hello_rx_at_exit = m_sr_hello.count;
         if (sr_cb_ev)    sr_cb_rx_at_exit    = m_sr_cb.count;
+        if (c_rx_ev)     c_rx_rx_at_exit     = m_c_rx.count;
+        if (l1_rx_ev)    l1_rx_rx_at_exit    = m_l1_rx.count;
+        if (l3_rx_ev)    l3_rx_rx_at_exit    = m_l3_rx.count;
+        if (sr_rx_ev)    sr_rx_rx_at_exit    = m_sr_rx.count;
     end
 
     // ---- waveform probes for the c_mem walkthrough (tb/soc.gtkw) ----
@@ -404,6 +503,22 @@ module soc_tb;
         .daddr(l3_cb.u_cpu.d_addr), .dwdata(l3_cb.u_cpu.d_wdata), .wstrb(l3_cb.u_cpu.d_wstrb),
         .valid(l3_cb.u_cpu.d_valid), .ready(l3_cb.u_cpu.d_ready));
 
+    retire_log #(.NAME("c_rx")) t_c_rx (.clk(clk), .rst(rst),
+        .pc(c_rx.u_cpu.i_addr), .instr(c_rx.u_cpu.i_data),
+        .we(c_rx.u_cpu.u_rf.we), .rd(c_rx.u_cpu.u_rf.rd), .wd(c_rx.u_cpu.u_rf.wd),
+        .daddr(c_rx.u_cpu.d_addr), .dwdata(c_rx.u_cpu.d_wdata), .wstrb(c_rx.u_cpu.d_wstrb),
+        .valid(c_rx.u_cpu.d_valid), .ready(c_rx.u_cpu.d_ready));
+    retire_log #(.NAME("c_rx@1")) t_l1_rx (.clk(clk), .rst(rst),
+        .pc(l1_rx.u_cpu.i_addr), .instr(l1_rx.u_cpu.i_data),
+        .we(l1_rx.u_cpu.u_rf.we), .rd(l1_rx.u_cpu.u_rf.rd), .wd(l1_rx.u_cpu.u_rf.wd),
+        .daddr(l1_rx.u_cpu.d_addr), .dwdata(l1_rx.u_cpu.d_wdata), .wstrb(l1_rx.u_cpu.d_wstrb),
+        .valid(l1_rx.u_cpu.d_valid), .ready(l1_rx.u_cpu.d_ready));
+    retire_log #(.NAME("c_rx@3")) t_l3_rx (.clk(clk), .rst(rst),
+        .pc(l3_rx.u_cpu.i_addr), .instr(l3_rx.u_cpu.i_data),
+        .we(l3_rx.u_cpu.u_rf.we), .rd(l3_rx.u_cpu.u_rf.rd), .wd(l3_rx.u_cpu.u_rf.wd),
+        .daddr(l3_rx.u_cpu.d_addr), .dwdata(l3_rx.u_cpu.d_wdata), .wstrb(l3_rx.u_cpu.d_wstrb),
+        .valid(l3_rx.u_cpu.d_valid), .ready(l3_rx.u_cpu.d_ready));
+
     // clocked RAM: `make trace PROG=p_mem LAT=sync`
     retire_log #(.NAME("p_arith@sync")) t_sr_arith (.clk(clk), .rst(rst),
         .pc(sr_arith.u_cpu.i_addr), .instr(sr_arith.u_cpu.i_data),
@@ -435,6 +550,11 @@ module soc_tb;
         .we(sr_cb.u_cpu.u_rf.we), .rd(sr_cb.u_cpu.u_rf.rd), .wd(sr_cb.u_cpu.u_rf.wd),
         .daddr(sr_cb.u_cpu.d_addr), .dwdata(sr_cb.u_cpu.d_wdata), .wstrb(sr_cb.u_cpu.d_wstrb),
         .valid(sr_cb.u_cpu.d_valid), .ready(sr_cb.u_cpu.d_ready));
+    retire_log #(.NAME("c_rx@sync")) t_sr_rx (.clk(clk), .rst(rst),
+        .pc(sr_rx.u_cpu.i_addr), .instr(sr_rx.u_cpu.i_data),
+        .we(sr_rx.u_cpu.u_rf.we), .rd(sr_rx.u_cpu.u_rf.rd), .wd(sr_rx.u_cpu.u_rf.wd),
+        .daddr(sr_rx.u_cpu.d_addr), .dwdata(sr_rx.u_cpu.d_wdata), .wstrb(sr_rx.u_cpu.d_wstrb),
+        .valid(sr_rx.u_cpu.d_valid), .ready(sr_rx.u_cpu.d_ready));
 
     // Every SoC has reached its final `jal x0, 0` (=== so X counts as not yet).
     wire all_done =
@@ -461,7 +581,11 @@ module soc_tb;
         (sr_branch.u_cpu.i_data === 32'h0000006F) &&
         (sr_jump.u_cpu.i_data === 32'h0000006F) &&
         (sr_hello.u_cpu.i_data === 32'h0000006F) &&
-        (sr_cb.u_cpu.i_data === 32'h0000006F);
+        (sr_cb.u_cpu.i_data === 32'h0000006F) &&
+        (c_rx.u_cpu.i_data === 32'h0000006F) &&
+        (l1_rx.u_cpu.i_data === 32'h0000006F) &&
+        (l3_rx.u_cpu.i_data === 32'h0000006F) &&
+        (sr_rx.u_cpu.i_data === 32'h0000006F);
 
     initial clk = 0;
     always #5 clk = ~clk;
@@ -524,6 +648,8 @@ module soc_tb;
         `CHECK_SERIAL(m_c_hello, s_c_hello, c_hello_rx_at_exit, "L0 ", "hello")
         `CHECK_C(c_cb, s_c_cb, "L0 ", "c_basics")
         `CHECK_SERIAL(m_c_cb, s_c_cb, c_cb_rx_at_exit, "L0 ", "c_basics")
+        `CHECK_RX(c_rx, s_c_rx, y_c_rx, "L0 ")
+        `CHECK_SERIAL(m_c_rx, s_c_rx, c_rx_rx_at_exit, "L0 ", "c_rx")
         $display("--- RAM latency 1 -------------------------------------------");
         `CHECK_ARITH(l1_arith, "L1 ")
         `CHECK_MEM(l1_mem, "L1 ")
@@ -533,6 +659,8 @@ module soc_tb;
         `CHECK_SERIAL(m_l1_hello, s_l1_hello, l1_hello_rx_at_exit, "L1 ", "hello")
         `CHECK_C(l1_cb, s_l1_cb, "L1 ", "c_basics")
         `CHECK_SERIAL(m_l1_cb, s_l1_cb, l1_cb_rx_at_exit, "L1 ", "c_basics")
+        `CHECK_RX(l1_rx, s_l1_rx, y_l1_rx, "L1 ")
+        `CHECK_SERIAL(m_l1_rx, s_l1_rx, l1_rx_rx_at_exit, "L1 ", "c_rx")
         $display("--- RAM latency 3 -------------------------------------------");
         `CHECK_ARITH(l3_arith, "L3 ")
         `CHECK_MEM(l3_mem, "L3 ")
@@ -542,6 +670,8 @@ module soc_tb;
         `CHECK_SERIAL(m_l3_hello, s_l3_hello, l3_hello_rx_at_exit, "L3 ", "hello")
         `CHECK_C(l3_cb, s_l3_cb, "L3 ", "c_basics")
         `CHECK_SERIAL(m_l3_cb, s_l3_cb, l3_cb_rx_at_exit, "L3 ", "c_basics")
+        `CHECK_RX(l3_rx, s_l3_rx, y_l3_rx, "L3 ")
+        `CHECK_SERIAL(m_l3_rx, s_l3_rx, l3_rx_rx_at_exit, "L3 ", "c_rx")
         $display("--- clocked RAM (ram_sync) -----------------------------------");
         `CHECK_ARITH(sr_arith, "SR ")
         `CHECK_MEM(sr_mem, "SR ")
@@ -551,6 +681,8 @@ module soc_tb;
         `CHECK_SERIAL(m_sr_hello, s_sr_hello, sr_hello_rx_at_exit, "SR ", "hello")
         `CHECK_C(sr_cb, s_sr_cb, "SR ", "c_basics")
         `CHECK_SERIAL(m_sr_cb, s_sr_cb, sr_cb_rx_at_exit, "SR ", "c_basics")
+        `CHECK_RX(sr_rx, s_sr_rx, y_sr_rx, "SR ")
+        `CHECK_SERIAL(m_sr_rx, s_sr_rx, sr_rx_rx_at_exit, "SR ", "c_rx")
 
         $display("--------------------------------------------------");
         if (errors == 0) $display("SOC: ALL TESTS PASSED (%0d checks)", checks);

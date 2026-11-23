@@ -10,6 +10,7 @@
 // (ram_sync's block RAMs), so a different program means a new build.
 //
 //   UART_TX      everything the program prints (115200 8N1)
+//   UART_RX      what you type: the program reads it with getchar() (soc.h)
 //   HEX5..HEX0   blank while it runs; after exit(), the exit code's low 24 bits in hex
 //   LEDR[0]      the program has exited
 //   LEDR[9]      serial activity: on for 0.1 s after any bit on UART_TX
@@ -35,7 +36,8 @@ module soc_top #(
     input  wire [1:0] KEY,                  // push buttons: 0 while pressed (KEY[1] unused)
     output wire [9:0] LEDR,
     output wire [7:0] HEX0, HEX1, HEX2, HEX3, HEX4, HEX5,   // {dp, g..a}: 0 = segment ON
-    output wire       UART_TX               // to the adapter's RXD
+    output wire       UART_TX,              // to the adapter's RXD
+    input  wire       UART_RX               // from the adapter's TXD
 );
     localparam PLL_DIV = 2;
     localparam CPU_HZ  = CLK_HZ / PLL_DIV;
@@ -83,7 +85,7 @@ module soc_top #(
         .clk(clk), .rst(rst),
         .char_valid(), .char_data(),        // printed characters: they go out on serial_tx
         .exit_valid(exit_valid), .exit_code(exit_code),
-        .serial_tx(UART_TX)
+        .serial_tx(UART_TX), .serial_rx(UART_RX)
     );
 
     // ---- the exit code, latched for the displays ----

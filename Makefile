@@ -23,7 +23,7 @@ IVFLAGS := -g2005 -Wall -I rtl
 # testbench may use tb/tb_lib.v; -s picks <MOD>_tb as the one top module, so the
 # library's (and rtl/'s) other modules are just parsed, never run.
 # A module built from other modules lists them in DEPS_<MOD>.
-DEPS_console  := rtl/uart_tx.v
+DEPS_console  := rtl/uart_tx.v rtl/uart_rx.v
 DEPS_ram_sync := rtl/ram_lane.v
 ifeq ($(MOD),soc)
 SRCS := $(wildcard rtl/*.v) tb/tb_lib.v tb/$(MOD)_tb.v

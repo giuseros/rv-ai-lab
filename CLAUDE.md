@@ -41,7 +41,7 @@ settings, no Platform Designer): projects are generated from the Tcl files in `b
 rtl/<mod>.v      RTL                          rtl/*.vh   shared `define headers
 tb/<mod>_tb.v    self-checking testbench      tb/p_*.S   regression programs (soc_tb)
 tb/tb_lib.v      console_sink, retire_log,    tb/c_*.c   C regression programs (soc_tb)
-                 uart_monitor (PC end of a serial line)
+                 uart_monitor / uart_driver (the PC's receiving / sending end of a serial line)
 tb/run_tb.v      runs any one program         sw/        programs to run (make run)
 sw/rt/           C runtime: crt0.S, link.ld, soc.h, runtime.c
 boards/<board>/  one folder per FPGA board: <top>_top.v + <top>_top_tb.v (blinky = smoke
@@ -79,7 +79,8 @@ word, one per line) for `ram_sync`'s byte lanes. C: `gcc -march=rv32i -mabi=ilp3
 (libgcc supplies mul/div; there is no libc, `soc.h` is the whole library: `printf` and
 `snprintf` (`%d %i %u %x %X %c %s %p %%`, `-`/`0` flags, width, `ll`; no `%f`, no
 precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec`,
-`print_hex`, `exit`, `mem*`, `strlen`). `-Wshadow` is on. On this toolchain `int32_t` is
+`print_hex`, `getchar` (waits; no EOF), `RX_DATA`/`RX_STAT` and their flag bits, `exit`,
+`mem*`, `strlen`). `-Wshadow` is on. On this toolchain `int32_t` is
 `long`, so `printf("%d", an_int32)` warns: cast to `(int)` or use `%ld`.
 
 ## Conventions
@@ -119,13 +120,18 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
 - Stimulus changes on the opposite clock edge from the one the DUT samples (e.g. reset
   is released on a negedge).
 - `soc_tb` runs every `tb/p_*.S` and `tb/c_*.c` at memory latency 0, 1 and 3 and on the
-  clocked RAM (24 SoCs; per-program checks are `` `define `` macros taking the instance
+  clocked RAM (28 SoCs; per-program checks are `` `define `` macros taking the instance
   name), runs until every SoC reaches its final `jal x0, 0` (timeout otherwise), and
   checks state through hierarchical references, so instance names are a contract:
   **`soc.v` names `u_cpu` and `g_mem.u_mem`, and `g_mem.word(n)` reads RAM word n
   whichever RAM it is; `cpu.v` names `u_rf`**. Never check `u_rf.regs[0]`: x0 is a
   read-mux constant, the array slot is X. The retire log must be identical on every RAM
-  (`make trace PROG=c_basics` vs `LAT=sync`); only the cycle count may differ.
+  (`make trace PROG=c_basics` vs `LAT=sync`); only the cycle count may differ. Except for
+  programs that wait for input (`c_rx`): how often a poll loop goes round depends on
+  timing, so there only the stores and the bytes received must be identical.
+- Every `soc` instance must drive `serial_rx`: tie it to `1'b1` (idle) if nothing types.
+  `c_rx` gets `rx_typist` (in `soc_tb.v`), which types the next script item each time the
+  program prints a prompt (`>`), through `uart_driver`.
 
 ## Design decisions worth knowing
 - **Memory** is one unified array (GCC emits one address space) with two async read
@@ -167,7 +173,8 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     register write) until ready. A slow-RAM test must exercise that path.
   - Memory map, decoded on `addr[31:28]`: `0` -> RAM (`0x0000_0000`-`0x0000_3FFF`,
     partial decode aliases), `1` -> I/O: `0x1000_0000` console (store a byte = print),
-    `0x1000_0004` exit (store a word = end sim with that code). Unmapped: stores
+    `0x1000_0004` exit (store a word = end sim with that code); since Phase 3 also
+    `0x1000_0008`/`0x1000_000C`, the receiver's RX_DATA/RX_STAT. Unmapped: stores
     dropped, loads return 0 (no traps yet).
   - The console is RTL (`console.v`): it decodes its two addresses and emits one-cycle
     char/exit *events* on completed stores; `soc` exposes the events and the testbench's
@@ -221,8 +228,20 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     = last byte, HEX5..2 = bytes received, LEDR[0] framing error, LEDR[1] byte dropped
     (both sticky). Its testbench: a paste from a PC 0.2% fast (needs the buffer; at
     exactly equal rates and fixed phase it wouldn't), and a 1%-fast sender whose
-    arrivals sweep every cycle of the echo's frame. Next: RX as a console device +
-    `getchar()`, then a bootloader, so a new program needn't be a new 8-minute build.
+    arrivals sweep every cycle of the echo's frame.
+    **RX on the SoC: done in sim**: the console owns a `uart_rx` and a receive FIFO
+    (`RX_DEPTH`, default 16 as in the 16550; pointers with an extra wrap bit; on the MAX 10
+    it is flip-flops, its read is combinational). `RX_DATA` `0x1000_0008`: load = the oldest
+    byte (bits 7:0), taken; `0x8000_0000` if empty (SiFive-style: one load asks and takes;
+    negative as an int). `RX_STAT` `0x1000_000C`: bit 0 waiting, bit 1 dropped (arrived with
+    the FIFO full), bit 2 framing error; loading it has NO side effect (safe to poll); bits
+    1-2 sticky, write-1-to-clear (`s = RX_STAT; RX_STAT = s`); a new event beats a clear in
+    the same cycle. Both act only on completion. `soc.serial_rx` in; `soc_top` wires
+    `UART_RX` (not yet built in Quartus). `console_tb` (159 checks, depth 16 and 2, sweeps
+    with the FIFO full); `soc.h` `getchar()`; `tb/c_rx.c` reads what `soc_tb`'s typist
+    types: getchar, RX_STAT polling, an `addi` = RX_DATA's address takes nothing, a
+    17-byte flood (16 kept), a framing error. Next: a program that reads on the board, then
+    a bootloader, so a new program needn't be a new 8-minute build.
     Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
     iverilog `-g2005` stays the strict language check.
   - Memory must read on the clock edge (block RAM): done, `ram_sync` (above).

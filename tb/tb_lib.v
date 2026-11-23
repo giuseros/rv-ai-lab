@@ -4,6 +4,7 @@
 //   retire_log    prints one line per retired instruction (tb/annotate.py
 //                 formats it)
 //   uart_monitor  a model of the PC's end of a serial line: decodes 8N1 bytes
+//   uart_driver   the PC's other end: sends 8N1 bytes, as typing or a paste does
 `timescale 1ns/1ps
 
 // ===========================================================================
@@ -166,4 +167,56 @@ module uart_monitor #(parameter BAUD = 115_200, parameter ECHO = 0) (
             if (ECHO) $write("%c", b);
         end
     end
+endmodule
+
+
+// ===========================================================================
+// uart_driver -- the PC's sending end of a serial line: drives `line` with
+// 8N1 frames in real time (ns), with its own idea of the bit length, unrelated
+// to any clock in the design, as a USB-serial adapter does.
+//
+// Call its tasks hierarchically (<instance>.send(...)), from one process at a
+// time. Each returns at the end of the stop bit; the line then stays high
+// (idle) until the next call, so consecutive calls are back to back, the
+// fastest a sender can be: what a paste or a file transfer looks like.
+//   send(b, stop)  one byte; stop = the stop bit's level (0: a framing error)
+//   send_text(s)   the characters of a string, first to last. A Verilog string
+//                  is right-aligned in its reg, so leading NUL bytes are padding
+//                  and skipped (a string can't contain NUL).
+//   pause(bits)    hold the line idle for a number of bit times
+// To keep line changes off clock edges, call it a few ns after an edge.
+// ===========================================================================
+module uart_driver #(parameter BAUD = 115_200) (
+    output reg line
+);
+    real bit_ns;
+    integer sent;                               // bytes sent so far
+    initial begin bit_ns = 1.0e9 / BAUD; line = 1'b1; sent = 0; end
+
+    task send(input [7:0] b, input stop);
+        integer k;
+    begin
+        line = 1'b0; #(bit_ns);                 // start bit
+        for (k = 0; k < 8; k = k + 1) begin
+            line = b[k]; #(bit_ns);             // d0 first
+        end
+        line = stop; #(bit_ns);
+        line = 1'b1;
+        sent = sent + 1;
+    end
+    endtask
+
+    task send_text(input [8*64:1] s);
+        integer k;
+    begin
+        for (k = 64; k >= 1; k = k - 1)
+            if (s[8*k -: 8] != 8'd0) send(s[8*k -: 8], 1'b1);
+    end
+    endtask
+
+    task pause(input real bits);
+    begin
+        line = 1'b1; #(bit_ns * bits);
+    end
+    endtask
 endmodule
