@@ -230,18 +230,22 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     exactly equal rates and fixed phase it wouldn't), and a 1%-fast sender whose
     arrivals sweep every cycle of the echo's frame.
     **RX on the SoC: done in sim**: the console owns a `uart_rx` and a receive FIFO
-    (`RX_DEPTH`, default 16 as in the 16550; pointers with an extra wrap bit; on the MAX 10
-    it is flip-flops, its read is combinational). `RX_DATA` `0x1000_0008`: load = the oldest
+    (`RX_DEPTH`, default 16 as in the 16550; pointers with an extra wrap bit). Its read is
+    combinational, yet Quartus puts it in an M9K (Simple Dual Port, + "pass-through" logic
+    for same-slot read/write): the read address `rx_rd` is a register, which it moves into
+    the RAM's address register. `RX_DATA` `0x1000_0008`: load = the oldest
     byte (bits 7:0), taken; `0x8000_0000` if empty (SiFive-style: one load asks and takes;
     negative as an int). `RX_STAT` `0x1000_000C`: bit 0 waiting, bit 1 dropped (arrived with
     the FIFO full), bit 2 framing error; loading it has NO side effect (safe to poll); bits
     1-2 sticky, write-1-to-clear (`s = RX_STAT; RX_STAT = s`); a new event beats a clear in
     the same cycle. Both act only on completion. `soc.serial_rx` in; `soc_top` wires
-    `UART_RX` (not yet built in Quartus). `console_tb` (159 checks, depth 16 and 2, sweeps
+    `UART_RX`. `console_tb` (159 checks, depth 16 and 2, sweeps
     with the FIFO full); `soc.h` `getchar()`; `tb/c_rx.c` reads what `soc_tb`'s typist
     types: getchar, RX_STAT polling, an `addi` = RX_DATA's address takes nothing, a
-    17-byte flood (16 kept), a framing error. Next: a program that reads on the board, then
-    a bootloader, so a new program needn't be a new 8-minute build.
+    17-byte flood (16 kept), a framing error. **On the board: done, verified**: `sw/talk.c`
+    (echo with Backspace, each line back reversed, `quit` -> lines typed on the displays;
+    3,296 LEs, Fmax 30.4 MHz slow corner, at 25 MHz). Next: a bootloader, so a new program
+    needn't be a new 8-minute build.
     Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
     iverilog `-g2005` stays the strict language check.
   - Memory must read on the clock edge (block RAM): done, `ram_sync` (above).
