@@ -43,7 +43,9 @@ tb/<mod>_tb.v    self-checking testbench      tb/p_*.S   regression programs (so
 tb/tb_lib.v      console_sink, retire_log,    tb/c_*.c   C regression programs (soc_tb)
                  uart_monitor / uart_driver (the PC's receiving / sending end of a serial line)
 tb/run_tb.v      runs any one program         sw/        programs to run (make run)
-sw/rt/           C runtime: crt0.S, link.ld, soc.h, runtime.c
+sw/rt/           C runtime: crt0.S, link.ld, soc.h, runtime.c   sw/boot.c  the bootloader
+tools/           host-side scripts: load.py (send a program to the bootloader, then a
+                 terminal; standard library only, no pyserial)
 boards/<board>/  one folder per FPGA board: <top>_top.v + <top>_top_tb.v (blinky = smoke
                  test, written first for every board), other board modules (any non-top
                  .v, e.g. max10_pll.v: built and simulated with every top), pins.tcl,
@@ -69,6 +71,10 @@ make fpga     BOARD=<b> TOP=<t>   # Quartus: synthesise, fit, assemble, time; re
 make program  BOARD=<b> TOP=<t>   # load the .sof over JTAG (volatile: gone at power-off)
                                   #   TOP=soc takes PROG=<prog> (default primes): the program
                                   #   is the RAM's initial contents, so a new one = a new build
+make load PROG=<prog>      # send sw/<prog>.c to the board's bootloader (bitstream built
+                           #   with PROG=boot), then a terminal (Ctrl+] quits); PORT=,
+                           #   NOW=1 if the bootloader is already waiting (else: KEY[0])
+make sim  MOD=boot         # the bootloader receiving c_basics and primes in sim (~3 min)
 make clean
 ```
 `MOD=soc` compiles all of `rtl/*.v`. The `.S -> .hex` rule is `as -march=rv32i
@@ -244,8 +250,34 @@ precision), `puts` (which, unlike the standard one, adds NO newline), `print_dec
     types: getchar, RX_STAT polling, an `addi` = RX_DATA's address takes nothing, a
     17-byte flood (16 kept), a framing error. **On the board: done, verified**: `sw/talk.c`
     (echo with Backspace, each line back reversed, `quit` -> lines typed on the displays;
-    3,296 LEs, Fmax 30.4 MHz slow corner, at 25 MHz). Next: a bootloader, so a new program
-    needn't be a new 8-minute build.
+    3,296 LEs, Fmax 30.4 MHz slow corner, at 25 MHz).
+    **Bootloader: done, verified on the board** (`sw/boot.c`, ~1.1 KB; `make load` sent
+    `primes`, 6.8 KB, in ~0.6 s; KEY[0] reruns it, `c_basics` is refused). Layout A: the CPU starts at 0, so the bootloader owns
+    `0x000`-`0x7FF` (its stack grows down from `0x800`) and loaded programs are linked
+    at `LOAD_ORIGIN` = `0x800` (Makefile; first `0x400`, outgrown by the rerun code).
+    `link.ld` takes `PROG_ORIGIN`, `STACK_TOP`, `STACK_MIN` via `--defsym` (defaults =
+    the old layout: every other image is byte-identical); the bootloader gets the
+    address as the link symbol `__load_addr`. Frame: `"RVLD"`, length (LE), bytes,
+    CRC-32 (zlib's; 16-entry table, 2 lookups a byte) -> one answer line: `boot: ok`
+    (then it jumps; the program's crt0 takes over), `bad length`, `bad checksum`,
+    `bytes lost` (RX_STAT flags). A frame cut short leaves it waiting: KEY[0].
+    After reset (Arduino-style) it waits ~1 s (`WAIT_POLLS`, a poll count: no timer
+    yet) for a frame, else reruns the last program: a record {magic, length, CRC} in
+    `.noinit` (a NOLOAD section crt0 doesn't clear) survives reset, and the RAM image
+    must still match the CRC (`boot: running the last program`), else `boot: last
+    program changed, send it again` (it wrote its own `.data`, as `c_basics` does).
+    `tools/load.py` waits for `boot: ready` (press KEY[0]), so it lands in the wait.
+    `tb/boot_tb.v` runs `build/boot_sim.hex` (same source, `WAIT_POLLS=2000`): power-on
+    garbage reruns nothing (fills `0xDEADBEEF` and `0x00000123`: the latter's length
+    looks valid, only the magic stops it), junk, bad length, bad CRC, a bad stop bit,
+    `c_basics` at `0x800` passes its self-checks, reset refuses to rerun it, `primes`
+    sent in the wait runs, reset reruns it, bootloader code untouched. The testbench's
+    CRC is its own bit-at-a-time code; `load.py` uses zlib: three implementations agree.
+    Mutants 9/9 + 5/5. Lessons: a sender must idle >= 1 bit after a stop bit of 0, or
+    `uart_rx` (armed) skips the next start bit and loses sync (the testbench did);
+    `link.ld`'s stack-room ASSERT was a difference that wrapped and passed (now a sum);
+    crt0's `la sp` must not be relaxed (an early-pass gp-relative relaxation went out of
+    range at `0x800`: "relocation truncated to fit").
     Quartus has no Verilog-2005 mode: it parses as `VERILOG_2001`, and
     iverilog `-g2005` stays the strict language check.
   - Memory must read on the clock edge (block RAM): done, `ram_sync` (above).

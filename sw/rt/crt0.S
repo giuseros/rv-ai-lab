@@ -21,7 +21,14 @@ _start:
     la      gp, __global_pointer$
     .option pop
 
+    # Not relaxed either: when __stack_top is within 2 KiB of gp the linker may
+    # turn this into one gp-relative addi, decided in an early pass; relaxing
+    # other code then shrinks it, gp moves down, and the distance can end up out
+    # of range ("relocation truncated to fit"; seen linking c_basics at 0x800).
+    .option push
+    .option norelax
     la      sp, __stack_top         # top of RAM; the stack grows down
+    .option pop
 
     # zero .bss, one word at a time
     la      t0, __bss_start

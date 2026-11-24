@@ -8,6 +8,8 @@
 #   make run   PROG=count     # run sw/count.S (or sw/count.c) on one SoC: output, exit code, CPI
 #                             #   add LAT=3 for slow memory, TRACE=1 for the retire log
 #   make dis   PROG=p_mem     # disassemble a test program
+#   make sim   MOD=boot       # the bootloader (sw/boot.c) receiving a program in sim
+#   make load  PROG=talk      # send sw/talk.c to the board's bootloader, then talk to it
 #   make clean
 #
 # Convention: each module <MOD> has rtl/<MOD>.v and a testbench tb/<MOD>_tb.v
@@ -25,7 +27,7 @@ IVFLAGS := -g2005 -Wall -I rtl
 # A module built from other modules lists them in DEPS_<MOD>.
 DEPS_console  := rtl/uart_tx.v rtl/uart_rx.v
 DEPS_ram_sync := rtl/ram_lane.v
-ifeq ($(MOD),soc)
+ifneq ($(filter soc boot,$(MOD)),)
 SRCS := $(wildcard rtl/*.v) tb/tb_lib.v tb/$(MOD)_tb.v
 else
 SRCS := rtl/$(MOD).v $(DEPS_$(MOD)) tb/tb_lib.v tb/$(MOD)_tb.v
@@ -71,7 +73,7 @@ CFLAGS := -march=rv32i -mabi=ilp32 -O2 -ffreestanding -nostdlib -nostartfiles \
 LDFLAGS := -Wl,--no-warn-rwx-segments
 RT     := sw/rt/crt0.S sw/rt/runtime.c
 define C_TO_HEX
-	$(RISCV)-gcc $(CFLAGS) -T sw/rt/link.ld $(LDFLAGS) -o $(BUILD)/$*.elf $(RT) $< -lgcc
+	$(RISCV)-gcc $(CFLAGS) -T sw/rt/link.ld $(LDFLAGS) $(LDSYMS) -o $(BUILD)/$*.elf $(RT) $< -lgcc
 	$(RISCV)-objcopy -O binary $(BUILD)/$*.elf $(BUILD)/$*.bin
 	od -An -tx4 -v -w4 $(BUILD)/$*.bin | awk '{print $$1}' > $@
 	$(HEX_LANES)
@@ -81,13 +83,51 @@ $(BUILD)/%.hex: sw/%.c $(RT) sw/rt/soc.h sw/rt/link.ld | $(BUILD)
 $(BUILD)/%.hex: tb/%.c $(RT) sw/rt/soc.h sw/rt/link.ld | $(BUILD)
 	$(C_TO_HEX)
 
+# The bootloader (sw/boot.c) owns RAM below LOAD_ORIGIN; the programs it loads
+# are linked to start there. It is built like any program (build/boot.hex, the
+# image for `make fpga ... PROG=boot`), except: its stack starts at LOAD_ORIGIN
+# (inside its own space, below anything it loads), it needs little of it, and it
+# links crt0 alone (runtime.c's printf would not fit).
+LOAD_ORIGIN := 0x800
+$(BUILD)/boot.hex: RT     := sw/rt/crt0.S
+BOOT_LDSYMS := -Wl,--defsym=STACK_TOP=$(LOAD_ORIGIN) -Wl,--defsym=STACK_MIN=512 \
+               -Wl,--defsym=__load_addr=$(LOAD_ORIGIN)
+$(BUILD)/boot.hex: LDSYMS := $(BOOT_LDSYMS)
+
+# The simulation's bootloader (tb/boot_tb.v): the same, except that after reset it
+# waits 2000 polls for a new program instead of ~1 s (25M cycles: minutes of sim).
+$(BUILD)/boot_sim.hex: sw/boot.c sw/rt/crt0.S sw/rt/soc.h sw/rt/link.ld | $(BUILD)
+	$(RISCV)-gcc $(CFLAGS) -DWAIT_POLLS=2000 -T sw/rt/link.ld $(LDFLAGS) $(BOOT_LDSYMS) \
+	    -o $(BUILD)/boot_sim.elf sw/rt/crt0.S $< -lgcc
+	$(RISCV)-objcopy -O binary $(BUILD)/boot_sim.elf $(BUILD)/boot_sim.bin
+	od -An -tx4 -v -w4 $(BUILD)/boot_sim.bin | awk '{print $$1}' > $@
+	$(HEX_LANES)
+
+# A program for the bootloader: linked at LOAD_ORIGIN, as a raw image (its first
+# byte belongs at LOAD_ORIGIN), plus one byte per line for a testbench to send.
+define C_TO_LOAD
+	$(RISCV)-gcc $(CFLAGS) -T sw/rt/link.ld $(LDFLAGS) -Wl,--defsym=PROG_ORIGIN=$(LOAD_ORIGIN) \
+	    -o $(BUILD)/load/$*.elf $(RT) $< -lgcc
+	$(RISCV)-objcopy -O binary $(BUILD)/load/$*.elf $@
+endef
+$(BUILD)/load/%.bin: sw/%.c $(RT) sw/rt/soc.h sw/rt/link.ld | $(BUILD)/load
+	$(C_TO_LOAD)
+$(BUILD)/load/%.bin: tb/%.c $(RT) sw/rt/soc.h sw/rt/link.ld | $(BUILD)/load
+	$(C_TO_LOAD)
+$(BUILD)/load/%.bytes: $(BUILD)/load/%.bin
+	od -An -tx1 -v -w1 $< | awk '{print $$1}' > $@
+$(BUILD)/load:
+	@mkdir -p $@
+.PRECIOUS: $(BUILD)/load/%.bin              # make load sends it: not an intermediate
+
 # Disassemble a test program, to read alongside the waveform.
 dis: $(BUILD)/$(PROG).hex
 	@$(RISCV)-objdump -d -M no-aliases,numeric $(BUILD)/$(PROG).elf | sed -n '/>:/,$$p'
 .PHONY: dis
 
 .PHONY: sim wave trace clean
-sim: $(BUILD)/$(MOD).vvp $(if $(filter soc,$(MOD)),$(PROG_HEX))
+BOOT_SIM := $(BUILD)/boot_sim.hex $(BUILD)/load/c_basics.bytes $(BUILD)/load/primes.bytes
+sim: $(BUILD)/$(MOD).vvp $(if $(filter soc,$(MOD)),$(PROG_HEX)) $(if $(filter boot,$(MOD)),$(BOOT_SIM))
 	@vvp $<
 
 wave: sim
@@ -112,6 +152,14 @@ run: $(BUILD)/$(PROG).hex
 	    | grep -vE "Not enough words in the file|finish called at" \
 	    $(if $(TRACE),| python3 tb/annotate.py --all $(BUILD)/$(PROG).elf)
 .PHONY: run
+
+# Send a program to the bootloader on the board (sw/boot.c, built into the FPGA
+# with `make fpga BOARD=de10-lite TOP=soc PROG=boot`), then talk to it.
+#   make load PROG=talk [PORT=/dev/ttyUSB0] [NOW=1: the bootloader is already waiting]
+PORT ?= /dev/ttyUSB0
+load: $(BUILD)/load/$(PROG).bin
+	@python3 tools/load.py $(PORT) $< $(if $(NOW),--now)
+.PHONY: load
 
 $(BUILD)/$(MOD).vvp: $(SRCS) | $(BUILD)
 	iverilog $(IVFLAGS) -s $(MOD)_tb -o $@ $(SRCS)
